@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "postgres": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://flagz:flagz@localhost:5432/flagz?sslmode=disable"
+      ]
+    }
+  }
+}
