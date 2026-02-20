@@ -3,7 +3,14 @@ name: Docker Publish
 on:
   release:
     types: [published]
+  repository_dispatch:
+    types: [release-please-published]
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Release tag to publish (optional)
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -19,6 +26,20 @@ jobs:
       - name: Normalize image name
         id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve release tag
+        id: release_tag
+        run: |
+          tag=""
+          if [ "${{ github.event_name }}" = "release" ]; then
+            tag="${{ github.event.release.tag_name }}"
+          elif [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            tag="${{ github.event.client_payload.tag_name }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag_name }}"
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -39,11 +60,11 @@ jobs:
         with:
           images: ${{ steps.image.outputs.name }}
           tags: |
-            type=semver,pattern={{raw}},value=${{ github.event.release.tag_name }},enable=${{ github.event_name == 'release' }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ github.event.release.tag_name }},enable=${{ github.event_name == 'release' }}
-            type=semver,pattern={{major}},value=${{ github.event.release.tag_name }},enable=${{ github.event_name == 'release' }}
-            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
-            type=sha,format=short,enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=semver,pattern={{raw}},value=${{ steps.release_tag.outputs.tag }},enable=${{ steps.release_tag.outputs.tag != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.release_tag.outputs.tag }},enable=${{ steps.release_tag.outputs.tag != '' }}
+            type=semver,pattern={{major}},value=${{ steps.release_tag.outputs.tag }},enable=${{ steps.release_tag.outputs.tag != '' }}
+            type=raw,value=latest,enable=${{ steps.release_tag.outputs.tag != '' }}
+            type=sha,format=short,enable=${{ steps.release_tag.outputs.tag == '' }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
