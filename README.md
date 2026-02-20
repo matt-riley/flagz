@@ -1,6 +1,6 @@
 # flagz 🚩
 
-> *Feature flags for your code's wildest adventures.*
+> _Feature flags for your code's wildest adventures._
 
 **flagz** is a self-hosted feature flag service. It stores flags in PostgreSQL, evaluates them at the speed of an in-memory cache, and shouts about changes over HTTP Server-Sent Events and gRPC streams. It speaks both REST and gRPC, fits in a distroless container, and won't phone home.
 
@@ -44,7 +44,7 @@ GET  /v1/stream    →  SSE: flag updated / deleted events
 ```
 
 1. On startup the service loads all flags into an in-memory cache.
-2. Every write (create / update / delete) immediately updates the cache *and* appends a row to `flag_events`, then fires a best-effort PostgreSQL `NOTIFY` on the `flag_events` channel.
+2. Every write (create / update / delete) immediately updates the cache _and_ appends a row to `flag_events`, then fires a best-effort PostgreSQL `NOTIFY` on the `flag_events` channel.
 3. The cache listener wakes on `NOTIFY` (and re-syncs every minute regardless, as a safety net) to stay current.
 4. `ListFlags` and all evaluations read exclusively from the cache — the database is never touched during hot-path reads.
 
@@ -56,7 +56,7 @@ GET  /v1/stream    →  SSE: flag updated / deleted events
 
 ```bash
 # 1. Clone and build
-git clone https://github.com/mattriley/flagz
+git clone https://github.com/matt-riley/flagz
 cd flagz
 
 # 2. Start a local Postgres + flagz stack (see docker-compose.example.yml)
@@ -83,8 +83,8 @@ curl -s -H "Authorization: Bearer <id>.<secret>" http://localhost:8080/v1/flags
 All configuration is via environment variables.
 
 | Variable               | Required | Default | Description                                         |
-|------------------------|----------|---------|-----------------------------------------------------|
-| `DATABASE_URL`         | ✅        | —       | PostgreSQL connection string (pgx format)           |
+| ---------------------- | -------- | ------- | --------------------------------------------------- |
+| `DATABASE_URL`         | ✅       | —       | PostgreSQL connection string (pgx format)           |
 | `HTTP_ADDR`            |          | `:8080` | Address for the HTTP server                         |
 | `GRPC_ADDR`            |          | `:9090` | Address for the gRPC server                         |
 | `STREAM_POLL_INTERVAL` |          | `1s`    | How often streams poll for new events (must be > 0) |
@@ -114,28 +114,28 @@ Legacy SHA-256 hashes in `key_hash` are still accepted for backwards compatibili
 
 ```json
 {
-  "key":         "dark-mode",
+  "key": "dark-mode",
   "description": "Enable the dark side of the UI",
-  "enabled":     true,
-  "variants":    { "default": false },
+  "enabled": true,
+  "variants": { "default": false },
   "rules": [
-    { "attribute": "user_id", "operator": "in",     "value": [42, 99, 1337] },
-    { "attribute": "plan",    "operator": "equals", "value": "enterprise"   }
+    { "attribute": "user_id", "operator": "in", "value": [42, 99, 1337] },
+    { "attribute": "plan", "operator": "equals", "value": "enterprise" }
   ],
   "created_at": "2024-01-01T00:00:00Z",
   "updated_at": "2024-01-01T00:00:00Z"
 }
 ```
 
-| Field         | Type           | Notes                                                           |
-|---------------|----------------|-----------------------------------------------------------------|
-| `key`         | string         | Unique identifier. Required. Immutable after creation.          |
-| `description` | string         | Human-readable label. Optional.                                 |
-| `enabled`     | bool           | Master switch. `false` → always evaluates to `false`.           |
-| `variants`    | JSON object    | Optional. `{ "default": bool }` sets the fallback value.        |
-| `rules`       | JSON array     | Optional. List of targeting rules (see [Evaluation](#evaluation)). |
-| `created_at`  | RFC3339        | Set by the database.                                            |
-| `updated_at`  | RFC3339        | Updated by the database on every write.                         |
+| Field         | Type        | Notes                                                              |
+| ------------- | ----------- | ------------------------------------------------------------------ |
+| `key`         | string      | Unique identifier. Required. Immutable after creation.             |
+| `description` | string      | Human-readable label. Optional.                                    |
+| `enabled`     | bool        | Master switch. `false` → always evaluates to `false`.              |
+| `variants`    | JSON object | Optional. `{ "default": bool }` sets the fallback value.           |
+| `rules`       | JSON array  | Optional. List of targeting rules (see [Evaluation](#evaluation)). |
+| `created_at`  | RFC3339     | Set by the database.                                               |
+| `updated_at`  | RFC3339     | Updated by the database on every write.                            |
 
 ---
 
@@ -157,10 +157,10 @@ Rules are evaluated in order; the first match short-circuits to `true`. All rule
 
 ### Operators
 
-| Operator  | Matches when…                                                              |
-|-----------|----------------------------------------------------------------------------|
-| `equals`  | The attribute value equals the rule value (type-coercion-safe numeric comparison) |
-| `in`      | The attribute value is present in the rule's value array                   |
+| Operator | Matches when…                                                                     |
+| -------- | --------------------------------------------------------------------------------- |
+| `equals` | The attribute value equals the rule value (type-coercion-safe numeric comparison) |
+| `in`     | The attribute value is present in the rule's value array                          |
 
 Attributes and rule values can be strings, booleans, or numbers. Numeric comparisons handle cross-type equality correctly (e.g. `int64(42) == float64(42.0)`).
 
@@ -182,13 +182,13 @@ All request and response bodies are JSON. Unknown fields in request bodies are r
 
 ### Flags
 
-| Method   | Path                  | Description                   |
-|----------|-----------------------|-------------------------------|
-| `POST`   | `/v1/flags`           | Create a flag                 |
-| `GET`    | `/v1/flags`           | List all flags (from cache)   |
-| `GET`    | `/v1/flags/{key}`     | Get a single flag             |
-| `PUT`    | `/v1/flags/{key}`     | Replace a flag                |
-| `DELETE` | `/v1/flags/{key}`     | Delete a flag                 |
+| Method   | Path              | Description                 |
+| -------- | ----------------- | --------------------------- |
+| `POST`   | `/v1/flags`       | Create a flag               |
+| `GET`    | `/v1/flags`       | List all flags (from cache) |
+| `GET`    | `/v1/flags/{key}` | Get a single flag           |
+| `PUT`    | `/v1/flags/{key}` | Replace a flag              |
+| `DELETE` | `/v1/flags/{key}` | Delete a flag               |
 
 **Create a flag**
 
@@ -255,7 +255,7 @@ curl -X POST http://localhost:8080/v1/evaluate \
 ```json
 {
   "results": [
-    { "key": "dark-mode",    "value": true  },
+    { "key": "dark-mode", "value": true },
     { "key": "new-checkout", "value": false }
   ]
 }
@@ -279,16 +279,16 @@ authorization: Bearer <id>.<secret>
 
 ### Methods
 
-| Method           | Request                   | Response                    |
-|------------------|---------------------------|-----------------------------|
-| `CreateFlag`     | `CreateFlagRequest`       | `CreateFlagResponse`        |
-| `UpdateFlag`     | `UpdateFlagRequest`       | `UpdateFlagResponse`        |
-| `GetFlag`        | `GetFlagRequest`          | `GetFlagResponse`           |
-| `ListFlags`      | `ListFlagsRequest`        | `ListFlagsResponse`         |
-| `DeleteFlag`     | `DeleteFlagRequest`       | `DeleteFlagResponse`        |
-| `ResolveBoolean` | `ResolveBooleanRequest`   | `ResolveBooleanResponse`    |
-| `ResolveBatch`   | `ResolveBatchRequest`     | `ResolveBatchResponse`      |
-| `WatchFlag`      | `WatchFlagRequest`        | stream of `WatchFlagEvent`  |
+| Method           | Request                 | Response                   |
+| ---------------- | ----------------------- | -------------------------- |
+| `CreateFlag`     | `CreateFlagRequest`     | `CreateFlagResponse`       |
+| `UpdateFlag`     | `UpdateFlagRequest`     | `UpdateFlagResponse`       |
+| `GetFlag`        | `GetFlagRequest`        | `GetFlagResponse`          |
+| `ListFlags`      | `ListFlagsRequest`      | `ListFlagsResponse`        |
+| `DeleteFlag`     | `DeleteFlagRequest`     | `DeleteFlagResponse`       |
+| `ResolveBoolean` | `ResolveBooleanRequest` | `ResolveBooleanResponse`   |
+| `ResolveBatch`   | `ResolveBatchRequest`   | `ResolveBatchResponse`     |
+| `WatchFlag`      | `WatchFlagRequest`      | stream of `WatchFlagEvent` |
 
 `ListFlags` supports cursor-based pagination via `page_size` and `page_token` fields.
 
@@ -347,20 +347,20 @@ goose -dir migrations postgres "$DATABASE_URL" down
 
 ### Schema overview
 
-| Table          | Purpose                                                         |
-|----------------|-----------------------------------------------------------------|
-| `flags`        | Flag definitions (key, description, enabled, variants, rules)  |
-| `api_keys`     | Authentication credentials (id, name, bcrypt key_hash)         |
-| `flag_events`  | Append-only event log for streaming and cache invalidation      |
+| Table         | Purpose                                                       |
+| ------------- | ------------------------------------------------------------- |
+| `flags`       | Flag definitions (key, description, enabled, variants, rules) |
+| `api_keys`    | Authentication credentials (id, name, bcrypt key_hash)        |
+| `flag_events` | Append-only event log for streaming and cache invalidation    |
 
 ---
 
 ## Observability
 
-| Endpoint      | Auth required | Description                                  |
-|---------------|---------------|----------------------------------------------|
-| `GET /healthz` | No           | Returns `{"status":"ok"}` when the server is up |
-| `GET /metrics` | No           | Prometheus-compatible text exposition        |
+| Endpoint       | Auth required | Description                                     |
+| -------------- | ------------- | ----------------------------------------------- |
+| `GET /healthz` | No            | Returns `{"status":"ok"}` when the server is up |
+| `GET /metrics` | No            | Prometheus-compatible text exposition           |
 
 Current metrics:
 
