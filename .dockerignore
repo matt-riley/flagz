@@ -1,0 +1,12 @@
+.git
+.github
+bin/
+dist/
+tmp/
+*.log
+*.out
+coverage/
+coverage.out
+.env
+.env.*
+docker-compose*.yml

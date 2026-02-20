@@ -17,7 +17,7 @@
 - Streaming updates are event-table based: HTTP SSE (`GET /v1/stream`) and gRPC `WatchFlag` both poll `ListEventsSince` using `STREAM_POLL_INTERVAL` (default 1s). gRPC `WatchFlag` supports optional per-key filtering via the `key` field; SSE does not.
 
 ## Key repository conventions
-- Auth is bearer token based for all `/v1/*` HTTP endpoints and all gRPC methods; token format is `<api_key_id>.<raw_secret>`, and secrets are compared via SHA-256 + constant-time compare (`internal/middleware/api_key.go`, `cmd/server/main.go`).
+- Auth is bearer token based for all `/v1/*` HTTP endpoints and all gRPC methods; token format is `<api_key_id>.<raw_secret>`, and secrets are compared with salted bcrypt hashes (legacy SHA-256 hashes are still accepted for compatibility) (`internal/middleware/api_key.go`, `cmd/server/main.go`).
 - `/healthz` and `/metrics` are intentionally outside the `/v1/*` auth gate; keep this split when adding routes (`cmd/server/main.go` + `internal/server/http.go`).
 - JSON request decoding in HTTP handlers uses `DisallowUnknownFields` and enforces a single JSON object (`decodeJSONBody`), so new request fields must be added explicitly.
 - `POST /v1/evaluate` accepts either a single `key` field or a `requests` array — never both; providing both returns 400.

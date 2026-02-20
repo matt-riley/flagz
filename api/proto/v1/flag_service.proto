@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package flagz.v1;
+
+option go_package = "github.com/mattriley/flagz/api/proto/v1;flagspb";
+
+message Flag {
+  string key = 1;
+  string description = 2;
+  bool enabled = 3;
+  bytes variants_json = 4;
+  bytes rules_json = 5;
+}
+
+message CreateFlagRequest {
+  Flag flag = 1;
+}
+
+message CreateFlagResponse {
+  Flag flag = 1;
+}
+
+message UpdateFlagRequest {
+  Flag flag = 1;
+}
+
+message UpdateFlagResponse {
+  Flag flag = 1;
+}
+
+message GetFlagRequest {
+  string key = 1;
+}
+
+message GetFlagResponse {
+  Flag flag = 1;
+}
+
+message ListFlagsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message ListFlagsResponse {
+  repeated Flag flags = 1;
+  string next_page_token = 2;
+}
+
+message DeleteFlagRequest {
+  string key = 1;
+}
+
+message DeleteFlagResponse {}
+
+message ResolveBooleanRequest {
+  string key = 1;
+  bytes context_json = 2;
+  bool default_value = 3;
+}
+
+message ResolveBooleanResponse {
+  string key = 1;
+  bool value = 2;
+}
+
+message ResolveBatchRequest {
+  repeated ResolveBooleanRequest requests = 1;
+}
+
+message ResolveBatchResult {
+  string key = 1;
+  bool value = 2;
+}
+
+message ResolveBatchResponse {
+  repeated ResolveBatchResult results = 1;
+}
+
+enum WatchFlagEventType {
+  WATCH_FLAG_EVENT_TYPE_UNSPECIFIED = 0;
+  FLAG_UPDATED = 1;
+  FLAG_DELETED = 2;
+}
+
+message WatchFlagRequest {
+  string key = 1;
+  int64 last_event_id = 2;
+}
+
+message WatchFlagEvent {
+  WatchFlagEventType type = 1;
+  string key = 2;
+  Flag flag = 3;
+  int64 event_id = 4;
+}
+
+service FlagService {
+  rpc CreateFlag(CreateFlagRequest) returns (CreateFlagResponse);
+  rpc UpdateFlag(UpdateFlagRequest) returns (UpdateFlagResponse);
+  rpc GetFlag(GetFlagRequest) returns (GetFlagResponse);
+  rpc ListFlags(ListFlagsRequest) returns (ListFlagsResponse);
+  rpc DeleteFlag(DeleteFlagRequest) returns (DeleteFlagResponse);
+  rpc ResolveBoolean(ResolveBooleanRequest) returns (ResolveBooleanResponse);
+  rpc ResolveBatch(ResolveBatchRequest) returns (ResolveBatchResponse);
+  rpc WatchFlag(WatchFlagRequest) returns (stream WatchFlagEvent);
+}
