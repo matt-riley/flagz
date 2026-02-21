@@ -174,7 +174,7 @@ func TestEvaluate(t *testing.T) {
 			t.Errorf("unexpected key: %v", body["key"])
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"key":"my-flag","value":true}`)
+		fmt.Fprint(w, `{"results":[{"key":"my-flag","value":true}]}`)
 	})
 	v, err := c.Evaluate(context.Background(), "my-flag", flagz.EvaluationContext{}, false)
 	if err != nil {
