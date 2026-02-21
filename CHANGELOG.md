@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/matt-riley/flagz/compare/v1.1.0...v1.1.1) (2026-02-21)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/matt-riley/flagz to v1 ([#21](https://github.com/matt-riley/flagz/issues/21)) ([4d48455](https://github.com/matt-riley/flagz/commit/4d48455230e70db74f1fba5f09f68dd14c051f70))
+
 ## [1.1.0](https://github.com/matt-riley/flagz/compare/v1.0.0...v1.1.0) (2026-02-21)
 
 
