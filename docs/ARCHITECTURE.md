@@ -85,7 +85,7 @@ The system uses a **Read-Through / Write-Through** cache with **Event-Based Inva
 2. **Invalidation:**
    - The Service subscribes to the Postgres `flag_events` channel.
    - Upon receiving *any* notification, it triggers a full `LoadCache` (reload everything).
-   - **Safety Net:** A 1-minute ticker forces a resync to handle any missed UDP notifications.
+   - **Safety Net:** A 1-minute ticker forces a resync to handle any missed notifications.
 3. **Local Updates:** The instance creating a flag updates its own cache immediately, so "read-your-writes" consistency is maintained locally.
 
 ## Event System & Streaming

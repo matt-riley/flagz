@@ -128,7 +128,7 @@ components:
           $ref: '#/components/schemas/EvaluationContext'
         default_value:
           type: boolean
-          description: Value to return if the flag is missing or disabled.
+          description: Value to return if the flag is missing (not found). Disabled flags always evaluate to false.
           default: false
         requests:
           type: array
