@@ -5,6 +5,10 @@ import (
 	"reflect"
 )
 
+// EvaluateFlag evaluates a single flag against the given context and returns
+// the boolean result. A disabled flag always returns false. When no rules are
+// defined, the flag's default value is used (true if unset). If rules are
+// present, any matching rule yields true; otherwise the default applies.
 func EvaluateFlag(flag Flag, context EvaluationContext) bool {
 	if flag.Disabled {
 		return false
@@ -28,6 +32,9 @@ func EvaluateFlag(flag Flag, context EvaluationContext) bool {
 	return fallbackValue
 }
 
+// EvaluateFlags evaluates multiple flags against the same context, returning a
+// map of flag key to boolean result. Handy for batch evaluation without the
+// overhead of multiple round-trips.
 func EvaluateFlags(flags []Flag, context EvaluationContext) map[string]bool {
 	results := make(map[string]bool, len(flags))
 

@@ -1,3 +1,9 @@
+// Package service implements the feature-flag business logic and caching layer.
+//
+// It sits between the transport layer (HTTP/gRPC) and the persistence layer
+// (repository), owning flag CRUD, evaluation, event publishing, and an
+// in-memory flag cache that is eagerly loaded on startup and kept fresh via
+// PostgreSQL LISTEN/NOTIFY invalidations plus periodic resync.
 package service
 
 import (
@@ -17,7 +23,9 @@ import (
 )
 
 const (
-	EventTypeUpdated    = "updated"
+	// EventTypeUpdated is the event type emitted when a flag is created or updated.
+	EventTypeUpdated = "updated"
+	// EventTypeDeleted is the event type emitted when a flag is deleted.
 	EventTypeDeleted    = "deleted"
 	bestEffortTimeout   = 2 * time.Second
 	cacheResyncInterval = time.Minute
@@ -25,11 +33,16 @@ const (
 )
 
 var (
-	ErrFlagNotFound    = errors.New("flag not found")
-	ErrInvalidRules    = errors.New("invalid rules")
+	// ErrFlagNotFound is returned when a requested flag does not exist.
+	ErrFlagNotFound = errors.New("flag not found")
+	// ErrInvalidRules is returned when flag rules JSON is malformed.
+	ErrInvalidRules = errors.New("invalid rules")
+	// ErrInvalidVariants is returned when flag variants JSON is malformed.
 	ErrInvalidVariants = errors.New("invalid variants")
 )
 
+// Repository defines the persistence operations required by [Service].
+// It is satisfied by [repository.PostgresRepository].
 type Repository interface {
 	CreateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error)
 	UpdateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error)
@@ -45,23 +58,32 @@ type cacheInvalidationSubscriber interface {
 	SubscribeFlagInvalidation(ctx context.Context) (<-chan struct{}, error)
 }
 
+// ResolveRequest represents a single flag evaluation request, pairing a flag
+// key with an evaluation context and a default value to fall back on.
 type ResolveRequest struct {
 	Key          string
 	Context      core.EvaluationContext
 	DefaultValue bool
 }
 
+// ResolveResult holds the evaluated boolean result for a single flag key.
 type ResolveResult struct {
 	Key   string `json:"key"`
 	Value bool   `json:"value"`
 }
 
+// Service is the central feature-flag service. It manages flag CRUD operations,
+// boolean evaluation, event streaming, and an in-memory cache of all flags.
+// All exported methods are safe for concurrent use.
 type Service struct {
 	repo  Repository
 	mu    sync.RWMutex
 	cache map[string]repository.Flag
 }
 
+// New creates a [Service], eagerly loading the flag cache from the repository.
+// If the repository implements cache invalidation subscriptions, a background
+// listener is started to keep the cache fresh.
 func New(ctx context.Context, repo Repository) (*Service, error) {
 	if repo == nil {
 		return nil, errors.New("repository is nil")
@@ -84,6 +106,9 @@ func New(ctx context.Context, repo Repository) (*Service, error) {
 	return svc, nil
 }
 
+// LoadCache replaces the in-memory flag cache with a fresh snapshot from the
+// repository. It is called during startup and periodically to ensure
+// consistency.
 func (s *Service) LoadCache(ctx context.Context) error {
 	flags, err := s.repo.ListFlags(ctx)
 	if err != nil {
@@ -102,6 +127,8 @@ func (s *Service) LoadCache(ctx context.Context) error {
 	return nil
 }
 
+// CreateFlag validates and persists a new flag, updates the cache, and
+// publishes an "updated" event on a best-effort basis.
 func (s *Service) CreateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error) {
 	if strings.TrimSpace(flag.Key) == "" {
 		return repository.Flag{}, errors.New("flag key is required")
@@ -124,6 +151,9 @@ func (s *Service) CreateFlag(ctx context.Context, flag repository.Flag) (reposit
 	return created, nil
 }
 
+// UpdateFlag validates and persists changes to an existing flag. Returns
+// [ErrFlagNotFound] if the flag does not exist. On success, the cache is
+// updated and an "updated" event is published.
 func (s *Service) UpdateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error) {
 	if strings.TrimSpace(flag.Key) == "" {
 		return repository.Flag{}, errors.New("flag key is required")
@@ -150,6 +180,9 @@ func (s *Service) UpdateFlag(ctx context.Context, flag repository.Flag) (reposit
 	return updated, nil
 }
 
+// GetFlag returns a flag by key, serving from the in-memory cache when
+// available and falling back to the repository. Returns [ErrFlagNotFound]
+// if the flag does not exist.
 func (s *Service) GetFlag(ctx context.Context, key string) (repository.Flag, error) {
 	if strings.TrimSpace(key) == "" {
 		return repository.Flag{}, errors.New("flag key is required")
@@ -171,6 +204,8 @@ func (s *Service) GetFlag(ctx context.Context, key string) (repository.Flag, err
 	return flag, nil
 }
 
+// ListFlags returns all flags from the in-memory cache, sorted by key.
+// This method never hits the database — it's cache all the way down.
 func (s *Service) ListFlags(_ context.Context) ([]repository.Flag, error) {
 	s.mu.RLock()
 	flags := make([]repository.Flag, 0, len(s.cache))
@@ -186,6 +221,9 @@ func (s *Service) ListFlags(_ context.Context) ([]repository.Flag, error) {
 	return flags, nil
 }
 
+// DeleteFlag removes a flag by key. Returns [ErrFlagNotFound] if the flag
+// does not exist. On success, the cache is updated and a "deleted" event is
+// published.
 func (s *Service) DeleteFlag(ctx context.Context, key string) error {
 	existing, err := s.GetFlag(ctx, key)
 	if err != nil {
@@ -206,6 +244,9 @@ func (s *Service) DeleteFlag(ctx context.Context, key string) error {
 	return nil
 }
 
+// ResolveBoolean evaluates a single flag against the given context and returns
+// a boolean result. If the flag is not found, the provided default value is
+// returned without error.
 func (s *Service) ResolveBoolean(ctx context.Context, key string, evalContext core.EvaluationContext, defaultValue bool) (bool, error) {
 	flag, err := s.GetFlag(ctx, key)
 	if err != nil {
@@ -223,6 +264,8 @@ func (s *Service) ResolveBoolean(ctx context.Context, key string, evalContext co
 	return core.EvaluateFlag(coreFlag, evalContext), nil
 }
 
+// ResolveBatch evaluates multiple flags in a single call, returning results
+// in the same order as the requests.
 func (s *Service) ResolveBatch(ctx context.Context, requests []ResolveRequest) ([]ResolveResult, error) {
 	results := make([]ResolveResult, 0, len(requests))
 	for _, request := range requests {
@@ -240,6 +283,8 @@ func (s *Service) ResolveBatch(ctx context.Context, requests []ResolveRequest) (
 	return results, nil
 }
 
+// ListEventsSince returns flag events with IDs greater than eventID, used by
+// streaming consumers to poll for updates.
 func (s *Service) ListEventsSince(ctx context.Context, eventID int64) ([]repository.FlagEvent, error) {
 	events, err := s.repo.ListEventsSince(ctx, eventID)
 	if err != nil {
@@ -249,6 +294,8 @@ func (s *Service) ListEventsSince(ctx context.Context, eventID int64) ([]reposit
 	return events, nil
 }
 
+// ListEventsSinceForKey returns flag events for a specific key with IDs greater
+// than eventID, enabling per-flag streaming in gRPC WatchFlag.
 func (s *Service) ListEventsSinceForKey(ctx context.Context, eventID int64, key string) ([]repository.FlagEvent, error) {
 	if strings.TrimSpace(key) == "" {
 		return nil, errors.New("flag key is required")

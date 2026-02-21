@@ -1,106 +1,274 @@
+// FlagService defines the gRPC API for flagz — a feature flag management
+// service that supports CRUD operations, boolean flag evaluation with
+// rule-based targeting, and real-time streaming of flag change events.
+//
+// All methods require bearer-token authentication via the "authorization"
+// metadata header in the format: "Bearer <api_key_id>.<raw_secret>".
 syntax = "proto3";
 
 package flagz.v1;
 
 option go_package = "github.com/matt-riley/flagz/api/proto/v1;flagspb";
 
+// Flag represents a feature flag and its configuration.
+// Flags are the core unit of work here — everything else revolves around them.
 message Flag {
+  // Unique identifier for the flag. Required on create and update.
+  // Must be non-empty after trimming whitespace.
   string key = 1;
+
+  // Human-readable description of what this flag controls.
+  // Optional, but your future self will thank you for filling it in.
   string description = 2;
+
+  // Whether the flag is globally enabled. A disabled flag always evaluates
+  // to false, regardless of rules or variants.
   bool enabled = 3;
+
+  // JSON-encoded object holding variant configuration.
+  // Currently supports a boolean default via the "default" key.
+  // Expected schema: {"default": <bool>, ...}
+  // Example: {"default": false}
+  // When present and the flag has no matching rules, the "default" value
+  // is used instead of the implicit fallback of true.
+  // Optional — omit or send empty bytes if not needed.
   bytes variants_json = 4;
+
+  // JSON-encoded array of targeting rules evaluated during flag resolution.
+  // Each rule is an object with "attribute", "operator", and "value" fields.
+  // Expected schema: [{"attribute": "<string>", "operator": "<op>", "value": <any>}, ...]
+  // Supported operators:
+  //   - "equals": type-coercion-safe equality (handles int/float/string).
+  //   - "in":     checks membership in an array value.
+  // Example: [{"attribute": "country", "operator": "in", "value": ["AU", "NZ"]}]
+  // Rules are evaluated in order; the first match wins and returns true.
+  // Optional — omit or send empty bytes for an unconditional flag.
   bytes rules_json = 5;
 }
 
+// CreateFlagRequest contains the flag to create.
 message CreateFlagRequest {
+  // The flag to create. Must include a non-empty key.
+  // The key must be unique — duplicates will be rejected by the repository.
   Flag flag = 1;
 }
 
+// CreateFlagResponse returns the newly created flag as persisted.
 message CreateFlagResponse {
+  // The created flag, echoed back with any server-side defaults applied.
   Flag flag = 1;
 }
 
+// UpdateFlagRequest contains the flag to replace.
+// This is a full replacement — all fields are overwritten.
 message UpdateFlagRequest {
+  // The flag to update. Must include a non-empty key matching an existing flag.
   Flag flag = 1;
 }
 
+// UpdateFlagResponse returns the flag after the update has been applied.
 message UpdateFlagResponse {
+  // The updated flag as now persisted.
   Flag flag = 1;
 }
 
+// GetFlagRequest identifies a single flag to retrieve by its key.
 message GetFlagRequest {
+  // The unique key of the flag to retrieve. Required and must be non-empty.
   string key = 1;
 }
 
+// GetFlagResponse returns the requested flag.
 message GetFlagResponse {
+  // The flag matching the requested key.
   Flag flag = 1;
 }
 
+// ListFlagsRequest supports optional pagination over all flags.
+// Flags are served from an in-memory cache and sorted alphabetically by key.
 message ListFlagsRequest {
+  // Maximum number of flags to return per page.
+  // Zero or unset returns all flags in a single response (no pagination).
+  // Must be non-negative.
   int32 page_size = 1;
+
+  // Opaque pagination token returned from a previous ListFlagsResponse.
+  // Pass this to retrieve the next page. Do not fabricate your own —
+  // it won't end well.
   string page_token = 2;
 }
 
+// ListFlagsResponse returns a page of flags and an optional continuation token.
 message ListFlagsResponse {
+  // The flags in this page, sorted alphabetically by key.
   repeated Flag flags = 1;
+
+  // Token to pass in the next ListFlagsRequest to retrieve more results.
+  // Empty when there are no more pages.
   string next_page_token = 2;
 }
 
+// DeleteFlagRequest identifies a flag to delete by its key.
 message DeleteFlagRequest {
+  // The unique key of the flag to delete. Required and must be non-empty.
   string key = 1;
 }
 
+// DeleteFlagResponse is intentionally empty. No news is good news.
 message DeleteFlagResponse {}
 
+// ResolveBooleanRequest evaluates a single flag against an optional context.
 message ResolveBooleanRequest {
+  // The key of the flag to evaluate. Required and must be non-empty.
   string key = 1;
+
+  // JSON-encoded evaluation context providing targeting attributes.
+  // Expected schema: {"attributes": {"<key>": <value>, ...}}
+  // Example: {"attributes": {"country": "AU", "tier": "premium"}}
+  // Attributes are matched against the flag's rules during evaluation.
+  // Optional — omit or send empty bytes for context-free evaluation.
   bytes context_json = 2;
+
+  // Fallback value returned when the flag does not exist.
+  // If the flag exists, evaluation rules and variants take precedence.
   bool default_value = 3;
 }
 
+// ResolveBooleanResponse contains the result of evaluating a single flag.
 message ResolveBooleanResponse {
+  // The key of the evaluated flag, echoed back for correlation.
   string key = 1;
+
+  // The resolved boolean value after applying evaluation logic:
+  // disabled → false; rule match → true; variants.default if set; else true.
+  // Returns default_value from the request if the flag was not found.
   bool value = 2;
 }
 
+// ResolveBatchRequest evaluates multiple flags in a single call.
 message ResolveBatchRequest {
+  // The list of flag evaluation requests. Must contain at least one entry.
+  // Each entry requires a non-empty key and valid context_json (if provided).
   repeated ResolveBooleanRequest requests = 1;
 }
 
+// ResolveBatchResult holds the outcome of a single flag evaluation within a batch.
 message ResolveBatchResult {
+  // The key of the evaluated flag.
   string key = 1;
+
+  // The resolved boolean value for this flag.
   bool value = 2;
 }
 
+// ResolveBatchResponse returns results for all flags in the batch.
+// Results are returned in the same order as the requests.
 message ResolveBatchResponse {
+  // One result per request, maintaining the original request order.
   repeated ResolveBatchResult results = 1;
 }
 
+// WatchFlagEventType describes the kind of change that occurred to a flag.
 enum WatchFlagEventType {
+  // Default value per proto3 convention. Should not appear in practice —
+  // if it does, something has gone sideways.
   WATCH_FLAG_EVENT_TYPE_UNSPECIFIED = 0;
+
+  // The flag was created or updated. The event's flag field contains
+  // the full updated flag state.
   FLAG_UPDATED = 1;
+
+  // The flag was deleted. The event's flag field contains the flag state
+  // as it was just before deletion — a final farewell snapshot.
   FLAG_DELETED = 2;
 }
 
+// WatchFlagRequest configures a server-streaming subscription for flag events.
 message WatchFlagRequest {
+  // Optional flag key to filter events for a specific flag.
+  // When empty, events for all flags are streamed.
   string key = 1;
+
+  // Resume streaming from after this event ID (exclusive).
+  // Set to 0 or omit to receive only new events going forward.
+  // Must be non-negative.
   int64 last_event_id = 2;
 }
 
+// WatchFlagEvent represents a single flag change event delivered via the stream.
 message WatchFlagEvent {
+  // The type of change that occurred (updated or deleted).
   WatchFlagEventType type = 1;
+
+  // The key of the flag that changed.
   string key = 2;
+
+  // The full flag state at the time of the event.
+  // Present for both update and delete events.
+  // For deletes, this is the flag's state just prior to removal.
   Flag flag = 3;
+
+  // Monotonically increasing event identifier.
+  // Use this as last_event_id in a new WatchFlagRequest to resume
+  // the stream without missing events.
   int64 event_id = 4;
 }
 
+// FlagService provides feature flag management, evaluation, and streaming.
+//
+// All methods require bearer-token authentication passed via the
+// "authorization" metadata key: "Bearer <api_key_id>.<raw_secret>".
+//
+// Error codes follow standard gRPC conventions:
+//   - INVALID_ARGUMENT: missing or malformed required fields.
+//   - NOT_FOUND: the requested flag does not exist (CRUD only; evaluation
+//     gracefully falls back to the default value).
+//   - INTERNAL: unexpected server-side errors.
+//   - UNAUTHENTICATED: missing or invalid bearer token (handled by interceptor).
 service FlagService {
+  // CreateFlag persists a new feature flag.
+  // Requires flag.key to be non-empty and unique.
+  // Returns INVALID_ARGUMENT if key is missing or rules/variants are malformed.
   rpc CreateFlag(CreateFlagRequest) returns (CreateFlagResponse);
+
+  // UpdateFlag fully replaces an existing flag (PUT semantics).
+  // Requires flag.key to match an existing flag.
+  // Returns NOT_FOUND if the flag does not exist.
+  // Returns INVALID_ARGUMENT if key is missing or rules/variants are malformed.
   rpc UpdateFlag(UpdateFlagRequest) returns (UpdateFlagResponse);
+
+  // GetFlag retrieves a single flag by key.
+  // Returns NOT_FOUND if the flag does not exist.
+  // Returns INVALID_ARGUMENT if key is empty.
   rpc GetFlag(GetFlagRequest) returns (GetFlagResponse);
+
+  // ListFlags returns all flags, sorted alphabetically by key.
+  // Served from an in-memory cache — fast, but eventually consistent
+  // after writes (typically sub-second).
+  // Supports optional offset-based pagination via page_size and page_token.
   rpc ListFlags(ListFlagsRequest) returns (ListFlagsResponse);
+
+  // DeleteFlag removes a flag by key.
+  // Returns NOT_FOUND if the flag does not exist.
+  // Returns INVALID_ARGUMENT if key is empty.
   rpc DeleteFlag(DeleteFlagRequest) returns (DeleteFlagResponse);
+
+  // ResolveBoolean evaluates a single flag and returns a boolean result.
+  // If the flag is not found, returns the provided default_value rather
+  // than an error — because silently degrading beats loudly crashing.
+  // Returns INVALID_ARGUMENT if key is empty or context_json is malformed.
   rpc ResolveBoolean(ResolveBooleanRequest) returns (ResolveBooleanResponse);
+
+  // ResolveBatch evaluates multiple flags in a single round-trip.
+  // Each request in the batch is evaluated independently.
+  // Returns INVALID_ARGUMENT if the requests list is empty or any entry
+  // has an empty key or invalid context_json.
   rpc ResolveBatch(ResolveBatchRequest) returns (ResolveBatchResponse);
+
+  // WatchFlag opens a server-side stream of flag change events.
+  // Optionally filter to a single flag via the key field.
+  // Use last_event_id to resume without missing events after reconnection.
+  // The server polls for new events at a configurable interval (default 1s).
+  // The stream remains open until the client disconnects or the server shuts down.
   rpc WatchFlag(WatchFlagRequest) returns (stream WatchFlagEvent);
 }

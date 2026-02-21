@@ -25,6 +25,8 @@ const (
 
 var errJSONBodyTooLarge = errors.New("json request body too large")
 
+// HTTPServer handles HTTP requests for the flagz API, including flag CRUD,
+// evaluation, SSE streaming, health checks, and metrics.
 type HTTPServer struct {
 	service            Service
 	streamPollInterval time.Duration
@@ -48,10 +50,14 @@ type evaluateJSONResponse struct {
 	Results []service.ResolveResult `json:"results"`
 }
 
+// NewHTTPHandler returns an [http.Handler] wired with all flagz routes and a
+// default stream poll interval of 1 second.
 func NewHTTPHandler(svc Service) http.Handler {
 	return NewHTTPHandlerWithStreamPollInterval(svc, defaultStreamPollInterval)
 }
 
+// NewHTTPHandlerWithStreamPollInterval returns an [http.Handler] wired with all
+// flagz routes using the specified stream poll interval for SSE.
 func NewHTTPHandlerWithStreamPollInterval(svc Service, streamPollInterval time.Duration) http.Handler {
 	if svc == nil {
 		panic("service is nil")

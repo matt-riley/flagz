@@ -1,3 +1,12 @@
+// Package main is the entry point for the flagz server.
+//
+// The bootstrap sequence is:
+//  1. Load configuration from environment variables.
+//  2. Connect to PostgreSQL via pgxpool.
+//  3. Create the repository and service (eagerly loading the flag cache).
+//  4. Wire up the API key token validator.
+//  5. Start the HTTP server (:8080) and gRPC server (:9090) concurrently.
+//  6. Wait for SIGINT/SIGTERM, then gracefully shut down both servers.
 package main
 
 import (
