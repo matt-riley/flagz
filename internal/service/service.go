@@ -12,8 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/mattriley/flagz/internal/core"
-	"github.com/mattriley/flagz/internal/repository"
+	"github.com/matt-riley/flagz/internal/core"
+	"github.com/matt-riley/flagz/internal/repository"
 )
 
 const (

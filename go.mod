@@ -1,4 +1,4 @@
-module github.com/mattriley/flagz
+module github.com/matt-riley/flagz
 
 go 1.25.5
 

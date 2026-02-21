@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	flagspb "github.com/mattriley/flagz/api/proto/v1"
-	"github.com/mattriley/flagz/internal/repository"
-	"github.com/mattriley/flagz/internal/service"
+	flagspb "github.com/matt-riley/flagz/api/proto/v1"
+	"github.com/matt-riley/flagz/internal/repository"
+	"github.com/matt-riley/flagz/internal/service"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"

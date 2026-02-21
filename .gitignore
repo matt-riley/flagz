@@ -1,0 +1,21 @@
+# General
+.DS_Store
+.vscode/
+
+# Go
+bin/
+coverage.out
+go.work
+go.work.sum
+
+# Node
+node_modules/
+dist/
+npm-debug.log
+yarn-error.log
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
