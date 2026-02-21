@@ -13,9 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/mattriley/flagz/internal/core"
-	"github.com/mattriley/flagz/internal/repository"
-	"github.com/mattriley/flagz/internal/service"
+	"github.com/matt-riley/flagz/internal/core"
+	"github.com/matt-riley/flagz/internal/repository"
+	"github.com/matt-riley/flagz/internal/service"
 )
 
 const (

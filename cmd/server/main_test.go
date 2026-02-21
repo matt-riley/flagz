@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mattriley/flagz/internal/middleware"
+	"github.com/matt-riley/flagz/internal/middleware"
 )
 
 func mustHashAPIKey(t *testing.T, apiKey string) string {

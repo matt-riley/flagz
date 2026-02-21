@@ -26,3 +26,31 @@ jobs:
 
       - name: Vet
         run: go vet ./...
+
+  test-go-client:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: clients/go/go.mod
+          cache: true
+
+      - name: Create workspace
+        run: go work init . ./clients/go
+
+      - name: Test
+        run: go test ./...
+        working-directory: clients/go
+        env:
+          GONOSUMDB: github.com/matt-riley/flagz
+
+      - name: Vet
+        run: go vet ./...
+        working-directory: clients/go
+        env:
+          GONOSUMDB: github.com/matt-riley/flagz

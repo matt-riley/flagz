@@ -14,12 +14,12 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	flagspb "github.com/mattriley/flagz/api/proto/v1"
-	"github.com/mattriley/flagz/internal/config"
-	"github.com/mattriley/flagz/internal/middleware"
-	"github.com/mattriley/flagz/internal/repository"
-	"github.com/mattriley/flagz/internal/server"
-	"github.com/mattriley/flagz/internal/service"
+	flagspb "github.com/matt-riley/flagz/api/proto/v1"
+	"github.com/matt-riley/flagz/internal/config"
+	"github.com/matt-riley/flagz/internal/middleware"
+	"github.com/matt-riley/flagz/internal/repository"
+	"github.com/matt-riley/flagz/internal/server"
+	"github.com/matt-riley/flagz/internal/service"
 	"google.golang.org/grpc"
 )
 
