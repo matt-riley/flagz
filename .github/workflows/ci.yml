@@ -40,17 +40,14 @@ jobs:
           go-version-file: clients/go/go.mod
           cache: true
 
-      - name: Create workspace
-        run: go work init . ./clients/go
+      - name: Set local module replace
+        run: |
+          cd clients/go
+          go mod edit -replace github.com/matt-riley/flagz=../..
+          go mod tidy
 
       - name: Test
-        run: go test ./...
-        working-directory: clients/go
-        env:
-          GONOSUMDB: github.com/matt-riley/flagz
+        run: cd clients/go && go test ./...
 
       - name: Vet
-        run: go vet ./...
-        working-directory: clients/go
-        env:
-          GONOSUMDB: github.com/matt-riley/flagz
+        run: cd clients/go && go vet ./...
