@@ -3,7 +3,7 @@ module github.com/matt-riley/flagz/clients/go
 go 1.25.5
 
 require (
-	github.com/matt-riley/flagz v0.0.0
+	github.com/matt-riley/flagz v1.1.0
 	google.golang.org/grpc v1.79.1
 )
 
