@@ -85,14 +85,71 @@ docker compose up --build -d
 DATABASE_URL="postgresql://flagz:flagz@localhost:5432/flagz?sslmode=disable" \
   goose -dir migrations postgres "$DATABASE_URL" up
 
-# 4. Create an API key (directly in the database — flagz doesn't expose a key-management endpoint yet)
-#    Insert a bcrypt hash of your chosen secret alongside an id of your choice.
+# 4. Create an API key (see "Creating an API key" below)
 
 # 5. Kick the tyres
-curl -s -H "Authorization: Bearer <id>.<secret>" http://localhost:8080/v1/flags
+curl -s -H "Authorization: Bearer myapp.my-super-secret" http://localhost:8080/v1/flags
 ```
 
 > The `docker-compose.example.yml` file is a starting point. Copy it, customise it, don't commit your secrets.
+
+### Creating an API key
+
+flagz doesn't have a key-management API (yet), so you create keys directly in PostgreSQL. A bearer token has the format `<id>.<secret>` — you choose both, hash the secret with bcrypt, and insert the hash.
+
+**Option A: One-liner with `htpasswd`** (if you have Apache utils installed)
+
+```bash
+# Pick an id and secret
+API_KEY_ID="myapp"
+API_KEY_SECRET="my-super-secret"
+
+# Generate a bcrypt hash
+HASH=$(htpasswd -nbBC 10 "" "$API_KEY_SECRET" | cut -d: -f2)
+
+# Insert into the database
+psql "$DATABASE_URL" -c \
+  "INSERT INTO api_keys (id, name, key_hash) VALUES ('$API_KEY_ID', 'My App', '$HASH');"
+
+# Your bearer token is: myapp.my-super-secret
+```
+
+**Option B: Using Go** (works anywhere Go is installed)
+
+```bash
+# Generate a bcrypt hash using the same function flagz uses internally
+HASH=$(go run -C /path/to/flagz -mod=mod -e '
+  import "golang.org/x/crypto/bcrypt"
+  import "fmt"
+  import "os"
+  h, _ := bcrypt.GenerateFromPassword([]byte(os.Args[1]), bcrypt.DefaultCost)
+  fmt.Print(string(h))
+' "my-super-secret" 2>/dev/null)
+
+# Or simply use a Go one-liner
+HASH=$(go run golang.org/x/crypto/bcrypt@latest hash "my-super-secret")
+```
+
+**Option C: Using Docker** (no local tools needed)
+
+```bash
+# Spin up a quick container to generate the hash
+HASH=$(docker run --rm -it python:3-slim \
+  python -c "import bcrypt; print(bcrypt.hashpw(b'my-super-secret', bcrypt.gensalt()).decode())")
+
+# Insert it
+docker exec -it $(docker compose ps -q postgres) \
+  psql -U flagz -d flagz -c \
+  "INSERT INTO api_keys (id, name, key_hash) VALUES ('myapp', 'My App', '$HASH');"
+```
+
+Your bearer token is then `myapp.my-super-secret`. Use it as:
+
+```
+Authorization: Bearer myapp.my-super-secret
+```
+
+> **Tip:** The `id` can be anything you like — use it to identify which application or team owns the key. The `secret` should be long and random in production. What you see above is for kicking tyres only.
 
 ---
 
