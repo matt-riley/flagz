@@ -36,12 +36,12 @@ The system is built as a single binary that serves both HTTP and gRPC APIs. Its 
             +--------+--------+
             |                 |
             v                 v
-+-------------------+   +------------------+
-| Evaluation Engine |   |   Repository     |
-|  (internal/core)  |   | (internal/repo)  |
-| - Rule Matching   |   | - PostgreSQL     |
-| - Pure Functions  |   | - pgxpool        |
-+-------------------+   +------------------+
++-------------------+   +---------------------+
+| Evaluation Engine |   |     Repository      |
+|  (internal/core)  |   | (internal/repository) |
+| - Rule Matching   |   | - PostgreSQL        |
+| - Pure Functions  |   | - pgxpool           |
++-------------------+   +---------------------+
                                |
                                v
                      +------------------+
