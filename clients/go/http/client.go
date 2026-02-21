@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -206,7 +207,7 @@ func (c *Client) CreateFlag(ctx context.Context, flag flagz.Flag) (flagz.Flag, e
 }
 
 func (c *Client) GetFlag(ctx context.Context, key string) (flagz.Flag, error) {
-	resp, err := c.do(ctx, http.MethodGet, "/v1/flags/"+key, nil)
+	resp, err := c.do(ctx, http.MethodGet, "/v1/flags/"+url.PathEscape(key), nil)
 	if err != nil {
 		return flagz.Flag{}, err
 	}
@@ -248,7 +249,7 @@ func (c *Client) UpdateFlag(ctx context.Context, flag flagz.Flag) (flagz.Flag, e
 	if err != nil {
 		return flagz.Flag{}, err
 	}
-	resp, err := c.do(ctx, http.MethodPut, "/v1/flags/"+flag.Key, map[string]any{"flag": wf})
+	resp, err := c.do(ctx, http.MethodPut, "/v1/flags/"+url.PathEscape(flag.Key), map[string]any{"flag": wf})
 	if err != nil {
 		return flagz.Flag{}, err
 	}
@@ -263,7 +264,7 @@ func (c *Client) UpdateFlag(ctx context.Context, flag flagz.Flag) (flagz.Flag, e
 }
 
 func (c *Client) DeleteFlag(ctx context.Context, key string) error {
-	resp, err := c.do(ctx, http.MethodDelete, "/v1/flags/"+key, nil)
+	resp, err := c.do(ctx, http.MethodDelete, "/v1/flags/"+url.PathEscape(key), nil)
 	if err != nil {
 		return err
 	}
@@ -292,7 +293,10 @@ func (c *Client) Evaluate(ctx context.Context, key string, evalCtx flagz.Evaluat
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return defaultValue, fmt.Errorf("flagz: decode response: %w", err)
 	}
-	return out.Value, nil
+	if len(out.Results) == 0 {
+		return defaultValue, fmt.Errorf("flagz: empty results in evaluate response")
+	}
+	return out.Results[0].Value, nil
 }
 
 func (c *Client) EvaluateBatch(ctx context.Context, reqs []flagz.EvaluateRequest) ([]flagz.EvaluateResult, error) {

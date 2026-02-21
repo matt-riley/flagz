@@ -138,7 +138,7 @@ describe('createHTTPClient', () => {
 
   describe('evaluate', () => {
     it('POSTs to /v1/evaluate with single key', async () => {
-      const fetch = vi.fn().mockResolvedValue(makeResponse({ key: 'my-flag', value: true }))
+      const fetch = vi.fn().mockResolvedValue(makeResponse({ results: [{ key: 'my-flag', value: true }] }))
       const client = createHTTPClient({ ...baseConfig, fetch })
       const v = await client.evaluate('my-flag', {}, false)
       expect(v).toBe(true)
@@ -147,7 +147,7 @@ describe('createHTTPClient', () => {
     })
 
     it('sends Authorization header', async () => {
-      const fetch = vi.fn().mockResolvedValue(makeResponse({ key: 'x', value: false }))
+      const fetch = vi.fn().mockResolvedValue(makeResponse({ results: [{ key: 'x', value: false }] }))
       const client = createHTTPClient({ ...baseConfig, fetch })
       await client.evaluate('x', {}, false)
       expect(fetch.mock.calls[0][1]?.headers).toMatchObject({ Authorization: 'Bearer test-id.test-secret' })

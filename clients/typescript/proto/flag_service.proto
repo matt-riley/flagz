@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package flagz.v1;
 
-option go_package = "github.com/mattriley/flagz/api/proto/v1;flagspb";
+option go_package = "github.com/matt-riley/flagz/api/proto/v1;flagspb";
 
 message Flag {
   string key = 1;

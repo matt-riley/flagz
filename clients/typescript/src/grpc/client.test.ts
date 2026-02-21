@@ -213,14 +213,4 @@ describe('createGRPCClient', () => {
     expect(authValues?.[0]).toBe('Bearer my-id.my-secret')
   })
 
-  // -- Error on missing deps -------------------------------------------------
-
-  it('throws a helpful error when gRPC deps are missing', async () => {
-    // We test the lazy-load failure path by directly calling the module's
-    // import path override is complex in vitest; so we test the error shape by
-    // checking that the error message references npm install.
-    // This verifies the catch block in createGRPCClient.
-    // (Full dep-missing test requires a separate test environment.)
-    expect(true).toBe(true) // placeholder: covered by manual testing
-  })
 })

@@ -109,12 +109,16 @@ export function createHTTPClient(config: HTTPConfig): FlagClient {
 
   // Evaluator
   async function evaluate(key: string, ctx: EvaluationContext, defaultValue: boolean): Promise<boolean> {
-    const res = await request<{ key: string; value: boolean }>('POST', '/v1/evaluate', {
+    const res = await request<{ results: Array<{ key: string; value: boolean }> }>('POST', '/v1/evaluate', {
       key,
       context: ctx,
       default_value: defaultValue,
     })
-    return res.value
+    const results = res.results ?? []
+    if (results.length !== 1) {
+      throw new Error(`flagz: expected exactly 1 evaluation result, got ${results.length}`)
+    }
+    return results[0].value
   }
 
   async function evaluateBatch(requests: EvaluateRequest[]): Promise<EvaluateResult[]> {
@@ -172,8 +176,8 @@ export function createHTTPClient(config: HTTPConfig): FlagClient {
               }
               if (ev.type === 'update' || ev.type === 'delete') {
                 try {
-                  const parsed = JSON.parse(data) as Flag
-                  ev.flag = parsed
+                  const parsed = JSON.parse(data) as WireFlag
+                  ev.flag = wireToFlag(parsed)
                   ev.key = parsed.key ?? ''
                 } catch {
                   // malformed JSON: emit error event
