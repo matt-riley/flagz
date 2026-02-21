@@ -1,0 +1,465 @@
+openapi: 3.1.0
+info:
+  title: flagz API
+  version: 1.0.0
+  description: |
+    Feature flags for your code's wildest adventures.
+    
+    flagz is a self-hosted feature flag service that stores flags in PostgreSQL, evaluates them at the speed of light (or at least in-memory), and shouts about changes over HTTP Server-Sent Events.
+    
+    Don't panic. It's just a boolean.
+contact:
+  name: Maintainer
+  url: https://github.com/matt-riley/flagz
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: api_key_id.raw_secret
+      description: |
+        Authenticate using your API key ID and secret, joined by a dot.
+        Example: `user_123.secret_456`
+
+  schemas:
+    Flag:
+      type: object
+      required:
+        - key
+        - enabled
+      properties:
+        key:
+          type: string
+          description: Unique identifier for the flag. Immutable. Choose wisely.
+          example: dark-mode
+        description:
+          type: string
+          description: Human-readable explanation of what this flag actually controls.
+          example: Enable the dark side of the UI.
+        enabled:
+          type: boolean
+          description: Master switch. If false, the flag always evaluates to false, regardless of rules.
+          example: true
+        variants:
+          type: object
+          description: |
+            Optional variants configuration. Currently supports a "default" fallback.
+            If rules don't match, this decides the fate of your feature.
+          properties:
+            default:
+              type: boolean
+              description: Fallback value if no rules match.
+          additionalProperties: true
+          example:
+            default: false
+        rules:
+          type: array
+          description: List of targeting rules. Evaluated in order. First match wins.
+          items:
+            $ref: '#/components/schemas/Rule'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          description: When this flag came into existence.
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          description: When this flag was last tinkered with.
+
+    Rule:
+      type: object
+      required:
+        - attribute
+        - operator
+        - value
+      properties:
+        attribute:
+          type: string
+          description: The context attribute to check.
+          example: user_id
+        operator:
+          type: string
+          enum: [equals, in]
+          description: How to compare the attribute against the value.
+          example: in
+        value:
+          description: The value to compare against. Can be a string, number, boolean, or array.
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+            - type: array
+              items:
+                oneOf:
+                  - type: string
+                  - type: number
+                  - type: boolean
+          example: [42, 99, 1337]
+
+    EvaluationContext:
+      type: object
+      properties:
+        attributes:
+          type: object
+          description: Arbitrary key-value pairs describing the current context (user, request, etc.).
+          additionalProperties: true
+          example:
+            user_id: 42
+            plan: enterprise
+            beta: true
+
+    EvaluateRequest:
+      type: object
+      description: |
+        Request to evaluate one or more flags.
+        Provide either `key` (for single) or `requests` (for batch), but not both.
+      properties:
+        key:
+          type: string
+          description: Flag key to evaluate (single mode).
+        context:
+          $ref: '#/components/schemas/EvaluationContext'
+        default_value:
+          type: boolean
+          description: Value to return if the flag is missing (not found). Disabled flags always evaluate to false.
+          default: false
+        requests:
+          type: array
+          description: List of flags to evaluate (batch mode).
+          items:
+            $ref: '#/components/schemas/BatchEvaluationItem'
+      example:
+        key: dark-mode
+        context:
+          attributes:
+            user_id: 42
+        default_value: false
+
+    BatchEvaluationItem:
+      type: object
+      required:
+        - key
+      properties:
+        key:
+          type: string
+        context:
+          $ref: '#/components/schemas/EvaluationContext'
+        default_value:
+          type: boolean
+          default: false
+
+    EvaluateResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResolveResult'
+
+    ResolveResult:
+      type: object
+      properties:
+        key:
+          type: string
+          description: The flag key.
+        value:
+          type: boolean
+          description: The evaluated boolean result.
+      example:
+        key: dark-mode
+        value: true
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: A description of what went wrong.
+      example:
+        error: key is required
+
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/flags:
+    get:
+      summary: List all flags
+      description: Retrieve all flags from the in-memory cache. Fast as lightning.
+      responses:
+        '200':
+          description: A list of all known flags.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Flag'
+        '401':
+          description: Unauthorized. Did you forget your token?
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal Server Error. Something exploded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      summary: Create a flag
+      description: Bring a new feature flag into existence.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Flag'
+      responses:
+        '201':
+          description: Flag created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Flag'
+        '400':
+          description: Bad Request. Invalid JSON or missing required fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal Server Error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/flags/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The unique key of the flag.
+    get:
+      summary: Get a flag
+      description: Retrieve a single flag definition by its key.
+      responses:
+        '200':
+          description: The requested flag.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Flag'
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Flag not found. It might be hiding.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal Server Error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      summary: Update a flag
+      description: Update an existing flag definition. Replaces the entire flag resource.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Flag'
+      responses:
+        '200':
+          description: Flag updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Flag'
+        '400':
+          description: Bad Request. Path key and body key mismatch?
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Flag not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal Server Error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Delete a flag
+      description: Remove a flag from existence. This is a destructive action (obviously).
+      responses:
+        '204':
+          description: Flag deleted. Gone forever.
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Flag not found. Can't delete what isn't there.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal Server Error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/evaluate:
+    post:
+      summary: Evaluate flags
+      description: |
+        Evaluate one or more flags against a context.
+        Provide `key` for single evaluation, or `requests` for batch evaluation. Not both.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvaluateRequest'
+      responses:
+        '200':
+          description: Evaluation results.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluateResponse'
+        '400':
+          description: Bad Request. Ambiguous request (both key and requests provided) or missing fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal Server Error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/stream:
+    get:
+      summary: Stream flag updates
+      description: |
+        Subscribe to real-time flag changes via Server-Sent Events (SSE).
+        Events include `update` and `delete`.
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          schema:
+            type: integer
+          description: The ID of the last event received, to resume the stream.
+      responses:
+        '200':
+          description: SSE stream opened.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: |
+                  id: 42
+                  event: update
+                  data: {"key":"dark-mode","enabled":true}
+        '400':
+          description: Bad Request. Invalid Last-Event-ID?
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal Server Error. Streaming unsupported?
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /healthz:
+    get:
+      summary: Health check
+      description: Check if the server is up and running. No auth required.
+      security: []
+      responses:
+        '200':
+          description: Server is healthy.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      description: Expose internal metrics for Prometheus scraping. No auth required.
+      security: []
+      responses:
+        '200':
+          description: Metrics data.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  # HELP flagz_http_requests_total Total number of HTTP requests.
+                  # TYPE flagz_http_requests_total counter
+                  flagz_http_requests_total 42

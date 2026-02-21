@@ -1,8 +1,22 @@
 # flagz 🚩
 
+[![CI](https://github.com/matt-riley/flagz/actions/workflows/ci.yml/badge.svg)](https://github.com/matt-riley/flagz/actions/workflows/ci.yml)
+[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![Docker](https://img.shields.io/badge/Container-distroless-2496ED?logo=docker&logoColor=white)](https://github.com/matt-riley/flagz/pkgs/container/flagz)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 > _Feature flags for your code's wildest adventures._
 
 **flagz** is a self-hosted feature flag service. It stores flags in PostgreSQL, evaluates them at the speed of an in-memory cache, and shouts about changes over HTTP Server-Sent Events and gRPC streams. It speaks both REST and gRPC, fits in a distroless container, and won't phone home.
+
+## Why flagz?
+
+- **Self-hosted** — your data stays on your infrastructure. No SaaS pricing surprises at 3am.
+- **Fast** — flag evaluation hits an in-memory cache, not the database. Your hot path stays hot.
+- **Dual protocol** — REST for simplicity, gRPC for speed. Same service, same auth, same flags.
+- **Real-time** — SSE and gRPC streaming push flag changes to your app as they happen.
+- **Tiny footprint** — a single statically-linked binary in a distroless container. Your Kubernetes cluster will barely notice.
+- **Client libraries** — official [Go](clients/go/) and [TypeScript](clients/typescript/) clients with matching interfaces.
 
 ---
 
@@ -17,9 +31,13 @@
 - [HTTP API](#http-api)
 - [gRPC API](#grpc-api)
 - [Streaming changes](#streaming-changes)
+- [Client libraries](#client-libraries)
 - [Migrations](#migrations)
 - [Observability](#observability)
 - [Development](#development)
+- [Architecture](#architecture)
+- [Contributing](#contributing)
+- [Security](#security)
 
 ---
 
@@ -392,3 +410,36 @@ docker build -t flagz:local .
 ```
 
 The server runs on `:8080` (HTTP) and `:9090` (gRPC) by default.
+
+---
+
+## Client libraries
+
+Official clients are available for Go and TypeScript, both implementing the same interface pattern: **FlagManager** (CRUD), **Evaluator** (flag resolution), and **Streamer** (real-time events). Swap transports without changing your application code.
+
+| Language   | Transport    | Package                                              |
+| ---------- | ------------ | ---------------------------------------------------- |
+| Go         | HTTP + gRPC  | [`github.com/matt-riley/flagz/clients/go`](clients/go/)       |
+| TypeScript | HTTP + gRPC  | [`@matt-riley/flagz`](clients/typescript/)           |
+
+The TypeScript HTTP client has **zero runtime dependencies** — just `fetch` and dreams.
+
+See each client's README for quickstarts, examples, and integration guides.
+
+---
+
+## Architecture
+
+For a deep dive into how flagz is built — caching strategy, event system, data flow, and design decisions — see the **[Architecture Guide](docs/ARCHITECTURE.md)**.
+
+---
+
+## Contributing
+
+Contributions are welcome! See **[CONTRIBUTING.md](CONTRIBUTING.md)** for development setup, coding guidelines, and the PR process.
+
+---
+
+## Security
+
+For reporting vulnerabilities and security considerations, see **[SECURITY.md](SECURITY.md)**.

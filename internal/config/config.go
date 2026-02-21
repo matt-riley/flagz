@@ -1,3 +1,13 @@
+// Package config loads server configuration from environment variables.
+//
+// Required variables:
+//   - DATABASE_URL: PostgreSQL connection string.
+//
+// Optional variables:
+//   - HTTP_ADDR: listen address for the HTTP server (default ":8080").
+//   - GRPC_ADDR: listen address for the gRPC server (default ":9090").
+//   - STREAM_POLL_INTERVAL: polling interval for SSE and gRPC streaming
+//     (default "1s", must be > 0 if set).
 package config
 
 import (
@@ -14,6 +24,7 @@ const (
 	defaultStreamPollInterval = time.Second
 )
 
+// Config holds the runtime configuration for the flagz server.
 type Config struct {
 	DatabaseURL        string
 	HTTPAddr           string
@@ -21,6 +32,9 @@ type Config struct {
 	StreamPollInterval time.Duration
 }
 
+// Load reads configuration from environment variables, applying defaults where
+// appropriate. It returns an error if required variables are missing or if
+// optional values fail validation.
 func Load() (Config, error) {
 	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if databaseURL == "" {

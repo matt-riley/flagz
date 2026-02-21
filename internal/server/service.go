@@ -1,3 +1,11 @@
+// Package server provides HTTP and gRPC transport layers for the flagz
+// feature-flag service. Both transports delegate to the same [Service]
+// interface so that behavior stays consistent regardless of protocol.
+//
+// The HTTP layer serves a JSON REST API under /v1/*, SSE streaming at
+// GET /v1/stream, plus /healthz and /metrics endpoints. The gRPC layer
+// implements the FlagService proto, including server-streaming WatchFlag
+// with optional per-key filtering.
 package server
 
 import (
@@ -8,6 +16,9 @@ import (
 	"github.com/matt-riley/flagz/internal/service"
 )
 
+// Service defines the operations that both the HTTP and gRPC transports
+// require from the business logic layer. It is implemented by
+// [service.Service].
 type Service interface {
 	CreateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error)
 	UpdateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error)

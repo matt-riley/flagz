@@ -1,3 +1,6 @@
+// Package middleware provides authentication middleware for the flagz HTTP and
+// gRPC transports, including bearer-token validation, bcrypt-based API key
+// hashing, and legacy SHA-256 hash support for backward compatibility.
 package middleware
 
 import (

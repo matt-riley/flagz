@@ -18,16 +18,22 @@ import (
 
 const defaultGRPCStreamPollInterval = time.Second
 
+// GRPCServer implements the FlagService gRPC interface, providing flag CRUD,
+// boolean evaluation, batch resolution, and server-streaming watch.
 type GRPCServer struct {
 	flagspb.UnimplementedFlagServiceServer
 	service            Service
 	streamPollInterval time.Duration
 }
 
+// NewGRPCServer creates a [GRPCServer] with a default stream poll interval of
+// 1 second.
 func NewGRPCServer(svc Service) *GRPCServer {
 	return NewGRPCServerWithStreamPollInterval(svc, defaultGRPCStreamPollInterval)
 }
 
+// NewGRPCServerWithStreamPollInterval creates a [GRPCServer] with the specified
+// poll interval for the WatchFlag streaming RPC.
 func NewGRPCServerWithStreamPollInterval(svc Service, streamPollInterval time.Duration) *GRPCServer {
 	if svc == nil {
 		panic("service is nil")

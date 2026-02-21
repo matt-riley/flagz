@@ -1,3 +1,7 @@
+// Package repository provides PostgreSQL-backed persistence for feature flags,
+// API keys, and flag events. It also handles LISTEN/NOTIFY-based cache
+// invalidation so the service layer stays fresh without polling the database
+// into submission.
 package repository
 
 import (
@@ -17,6 +21,9 @@ const (
 	maxEventBatchSize    = 1000
 )
 
+// Flag is the repository-level representation of a feature flag row.
+// Note that Enabled has the opposite polarity to [core.Flag].Disabled;
+// the service layer handles the conversion.
 type Flag struct {
 	Key         string          `json:"key"`
 	Description string          `json:"description"`
@@ -27,6 +34,7 @@ type Flag struct {
 	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
+// APIKey represents a stored API key record used for bearer-token authentication.
 type APIKey struct {
 	ID        string     `json:"id"`
 	Name      string     `json:"name"`
@@ -35,6 +43,8 @@ type APIKey struct {
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
 }
 
+// FlagEvent represents a change event for a flag, stored in the flag_events
+// table and used to drive SSE and gRPC streaming.
 type FlagEvent struct {
 	EventID   int64           `json:"event_id"`
 	FlagKey   string          `json:"flag_key"`
@@ -43,15 +53,22 @@ type FlagEvent struct {
 	CreatedAt time.Time       `json:"created_at"`
 }
 
+// PostgresRepository implements flag, API key, and event persistence backed by
+// a pgxpool connection pool. It also supports LISTEN/NOTIFY for real-time
+// cache invalidation.
 type PostgresRepository struct {
 	pool          *pgxpool.Pool
 	notifyChannel string
 }
 
+// NewPostgresRepository creates a [PostgresRepository] using the default
+// "flag_events" notification channel.
 func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 	return NewPostgresRepositoryWithChannel(pool, defaultNotifyChannel)
 }
 
+// NewPostgresRepositoryWithChannel creates a [PostgresRepository] using the
+// specified LISTEN/NOTIFY channel name for flag event notifications.
 func NewPostgresRepositoryWithChannel(pool *pgxpool.Pool, notifyChannel string) *PostgresRepository {
 	return &PostgresRepository{
 		pool:          pool,
@@ -59,6 +76,8 @@ func NewPostgresRepositoryWithChannel(pool *pgxpool.Pool, notifyChannel string) 
 	}
 }
 
+// CreateFlag inserts a new flag row and returns the created record with
+// server-generated timestamps.
 func (r *PostgresRepository) CreateFlag(ctx context.Context, flag Flag) (Flag, error) {
 	var created Flag
 	err := r.pool.QueryRow(ctx, `
@@ -87,6 +106,8 @@ func (r *PostgresRepository) CreateFlag(ctx context.Context, flag Flag) (Flag, e
 	return created, nil
 }
 
+// UpdateFlag updates an existing flag row identified by key and returns the
+// updated record. Returns pgx.ErrNoRows (wrapped) if the flag does not exist.
 func (r *PostgresRepository) UpdateFlag(ctx context.Context, flag Flag) (Flag, error) {
 	var updated Flag
 	err := r.pool.QueryRow(ctx, `
@@ -120,6 +141,8 @@ func (r *PostgresRepository) UpdateFlag(ctx context.Context, flag Flag) (Flag, e
 	return updated, nil
 }
 
+// GetFlag retrieves a single flag by its key. Returns pgx.ErrNoRows (wrapped)
+// if not found.
 func (r *PostgresRepository) GetFlag(ctx context.Context, key string) (Flag, error) {
 	var flag Flag
 	err := r.pool.QueryRow(ctx, `
@@ -142,6 +165,7 @@ func (r *PostgresRepository) GetFlag(ctx context.Context, key string) (Flag, err
 	return flag, nil
 }
 
+// ListFlags returns all flags ordered by key.
 func (r *PostgresRepository) ListFlags(ctx context.Context) ([]Flag, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT key, description, enabled, variants, rules, created_at, updated_at
@@ -178,6 +202,8 @@ func (r *PostgresRepository) ListFlags(ctx context.Context) ([]Flag, error) {
 	return flags, nil
 }
 
+// DeleteFlag removes a flag by key. Returns pgx.ErrNoRows (wrapped) if the
+// flag does not exist.
 func (r *PostgresRepository) DeleteFlag(ctx context.Context, key string) error {
 	commandTag, err := r.pool.Exec(ctx, `DELETE FROM flags WHERE key = $1`, key)
 	if err != nil {
@@ -206,6 +232,8 @@ func (r *PostgresRepository) ValidateAPIKey(ctx context.Context, id string) (str
 	return keyHash, nil
 }
 
+// ListEventsSince returns up to 1000 flag events with IDs greater than
+// eventID, ordered by event ID.
 func (r *PostgresRepository) ListEventsSince(ctx context.Context, eventID int64) ([]FlagEvent, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT event_id, flag_key, event_type, payload, created_at
@@ -242,6 +270,8 @@ func (r *PostgresRepository) ListEventsSince(ctx context.Context, eventID int64)
 	return events, nil
 }
 
+// ListEventsSinceForKey returns up to 1000 flag events for a specific flag key
+// with IDs greater than eventID, ordered by event ID.
 func (r *PostgresRepository) ListEventsSinceForKey(ctx context.Context, eventID int64, key string) ([]FlagEvent, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT event_id, flag_key, event_type, payload, created_at
@@ -279,6 +309,8 @@ func (r *PostgresRepository) ListEventsSinceForKey(ctx context.Context, eventID 
 	return events, nil
 }
 
+// PublishFlagEvent inserts a flag event and sends a PostgreSQL NOTIFY on the
+// configured channel within a single transaction.
 func (r *PostgresRepository) PublishFlagEvent(ctx context.Context, event FlagEvent) (FlagEvent, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -321,6 +353,9 @@ func (r *PostgresRepository) PublishFlagEvent(ctx context.Context, event FlagEve
 	return created, nil
 }
 
+// SubscribeFlagInvalidation returns a channel that receives a signal whenever a
+// flag event notification arrives on the PostgreSQL LISTEN channel. The channel
+// is closed if the underlying connection is lost.
 func (r *PostgresRepository) SubscribeFlagInvalidation(ctx context.Context) (<-chan struct{}, error) {
 	invalidations := make(chan struct{}, 1)
 
