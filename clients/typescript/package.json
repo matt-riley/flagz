@@ -44,7 +44,7 @@
   "devDependencies": {
     "@grpc/grpc-js": "^1.13.4",
     "@grpc/proto-loader": "^0.8.0",
-    "@types/node": "^22.15.3",
+    "@types/node": "^24.0.0",
     "fast-check": "^4.5.3",
     "typescript": "^5.8.3",
     "vitest": "^3.1.2"

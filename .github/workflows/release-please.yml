@@ -55,7 +55,7 @@ jobs:
           ref: ${{ needs.release-please.outputs.typescript_tag_name }}
       - uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: 'https://npm.pkg.github.com'
           scope: '@matt-riley'
       - name: Install dependencies
