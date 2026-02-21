@@ -96,4 +96,4 @@ client, err := flagzgrpc.NewGRPCClient(flagzgrpc.Config{
 
 ## Requirements
 
-- Go 1.21+
+- A supported version of Go (see `go.mod` for the minimum version)

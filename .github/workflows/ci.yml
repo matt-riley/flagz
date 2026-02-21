@@ -40,11 +40,8 @@ jobs:
           go-version-file: clients/go/go.mod
           cache: true
 
-      - name: Set local module replace
-        run: |
-          cd clients/go
-          go mod edit -replace github.com/matt-riley/flagz=../..
-          go mod tidy
+      - name: Tidy modules
+        run: cd clients/go && go mod tidy
 
       - name: Test
         run: cd clients/go && go test ./...

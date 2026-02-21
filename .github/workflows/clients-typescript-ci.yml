@@ -30,4 +30,7 @@ jobs:
         working-directory: clients/typescript
 
       - name: Verify proto sync
-        run: diff api/proto/v1/flag_service.proto clients/typescript/proto/flag_service.proto
+        run: |
+          # The TS client proto is a copy of the canonical api/proto/v1/flag_service.proto.
+          # This check ensures they stay in sync.
+          diff api/proto/v1/flag_service.proto clients/typescript/proto/flag_service.proto
