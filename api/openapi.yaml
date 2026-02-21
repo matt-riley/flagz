@@ -450,7 +450,7 @@ paths:
   /metrics:
     get:
       summary: Prometheus metrics
-      description: Expose internal metrics for Prometheus scrapping. No auth required.
+      description: Expose internal metrics for Prometheus scraping. No auth required.
       security: []
       responses:
         '200':

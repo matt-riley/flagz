@@ -1,6 +1,6 @@
 // Package server provides HTTP and gRPC transport layers for the flagz
 // feature-flag service. Both transports delegate to the same [Service]
-// interface so that behaviour stays consistent regardless of protocol.
+// interface so that behavior stays consistent regardless of protocol.
 //
 // The HTTP layer serves a JSON REST API under /v1/*, SSE streaming at
 // GET /v1/stream, plus /healthz and /metrics endpoints. The gRPC layer
