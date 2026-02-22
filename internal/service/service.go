@@ -175,10 +175,10 @@ func (s *Service) LoadCache(ctx context.Context) error {
 	if s.onCacheLoad != nil {
 		s.onCacheLoad()
 	}
+	if s.onCacheReset != nil {
+		s.onCacheReset()
+	}
 	if s.onCacheUpdate != nil {
-		if s.onCacheReset != nil {
-			s.onCacheReset()
-		}
 		for pid, m := range next {
 			s.onCacheUpdate(pid, float64(len(m)))
 		}

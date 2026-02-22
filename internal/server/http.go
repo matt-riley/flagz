@@ -31,6 +31,7 @@ var errJSONBodyTooLarge = errors.New("json request body too large")
 type HTTPServer struct {
 	service            Service
 	metrics            *metrics.Metrics
+	metricsHandler     http.Handler
 	streamPollInterval time.Duration
 }
 
@@ -85,6 +86,7 @@ func NewHTTPHandlerWithOptions(svc Service, streamPollInterval time.Duration, m 
 	server := &HTTPServer{
 		service:            svc,
 		metrics:            m,
+		metricsHandler:     m.Handler(),
 		streamPollInterval: streamPollInterval,
 	}
 
@@ -138,10 +140,11 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 	return r.ResponseWriter.Write(b)
 }
 
-func (r *statusRecorder) Flush() {
-	if f, ok := r.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
+// Unwrap returns the underlying ResponseWriter so http.ResponseController
+// can detect real interface support (e.g. http.Flusher) instead of relying
+// on the wrapper's own type assertions.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
 }
 
 // routePattern returns the matched route pattern for metrics labels,
@@ -346,11 +349,7 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeJSONError(w, http.StatusInternalServerError, "streaming unsupported")
-		return
-	}
+	rc := http.NewResponseController(w)
 
 	s.metrics.ActiveStreams.WithLabelValues("sse").Inc()
 	defer s.metrics.ActiveStreams.WithLabelValues("sse").Dec()
@@ -372,7 +371,7 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 			if err := writeSSEEvent(w, event.EventID, eventName, payload); err != nil {
 				return err
 			}
-			flusher.Flush()
+			_ = rc.Flush()
 		}
 
 		return nil
@@ -389,7 +388,7 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 	headers.Set("Cache-Control", "no-cache")
 	headers.Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
+	_ = rc.Flush()
 
 	if err := writeEvents(initialEvents); err != nil {
 		return
@@ -408,7 +407,7 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return
 				}
-				writeSSEError(w, flusher, serviceErrorMessage(err))
+				writeSSEError(w, rc, serviceErrorMessage(err))
 				return
 			}
 			if err := writeEvents(events); err != nil {
@@ -423,7 +422,7 @@ func (s *HTTPServer) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *HTTPServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	s.metrics.Handler().ServeHTTP(w, r)
+	s.metricsHandler.ServeHTTP(w, r)
 }
 
 func parseLastEventID(value string) (int64, error) {
@@ -485,13 +484,13 @@ func serviceErrorMessage(err error) string {
 	}
 }
 
-func writeSSEError(w http.ResponseWriter, flusher http.Flusher, message string) {
+func writeSSEError(w http.ResponseWriter, rc *http.ResponseController, message string) {
 	payload, err := json.Marshal(map[string]string{"error": message})
 	if err != nil {
 		payload = []byte(`{"error":"internal server error"}`)
 	}
 	_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", payload)
-	flusher.Flush()
+	_ = rc.Flush()
 }
 
 func writeSSEEvent(w io.Writer, eventID int64, eventName string, payload []byte) error {
