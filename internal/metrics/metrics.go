@@ -30,6 +30,12 @@ type Metrics struct {
 	DBPoolTotal          prometheus.Gauge
 }
 
+// Metrics are defined upfront as part of the custom registry. Some metrics
+// (e.g., gRPC, cache, evaluation, auth, DB pool) are instrumented by
+// subsequent phases that add the corresponding middleware and hooks.
+// Defining them here ensures the registry is complete and /metrics always
+// exposes a consistent set of metric names.
+
 // New creates and registers all flagz metrics in a fresh registry.
 func New() *Metrics {
 	reg := prometheus.NewRegistry()
