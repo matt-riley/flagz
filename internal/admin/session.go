@@ -23,6 +23,7 @@ const (
 	sessionTokenLength = 32
 	maxLoginAttempts   = 5
 	loginWindow        = 15 * time.Minute
+	maxTrackedIPs      = 10000
 )
 
 var (
@@ -136,8 +137,12 @@ func (m *SessionManager) SetSessionCookie(w http.ResponseWriter, token string) {
 		HttpOnly: true,
 		// SameSite=Lax is safer for navigation than Strict, which can break links from external sites
 		SameSite: http.SameSiteLaxMode,
-		// Secure is omitted to allow plain HTTP over Tailscale (WireGuard encryption)
-		// Adding Secure would break the admin portal unless TLS is explicitly configured.
+		// SECURITY: Secure is false because the admin portal is designed to run over
+		// Tailscale, which provides WireGuard encryption at the network layer.
+		// If you expose this portal outside of Tailscale (e.g. via a reverse proxy
+		// with TLS termination), set Secure to true to ensure the cookie is only
+		// sent over HTTPS. Leaving Secure=false on a public network allows cookie
+		// theft via passive traffic interception.
 		Secure:  false,
 		Expires: time.Now().Add(sessionDuration),
 	})
@@ -181,10 +186,16 @@ func (m *SessionManager) CheckLoginRateLimit(ip string) bool {
 }
 
 // RecordLoginAttempt adds a failed login attempt for the IP.
+// If the map is at capacity and the IP is new, the attempt is silently dropped
+// to bound memory. This is acceptable since the admin portal runs on Tailscale
+// with a limited set of users.
 func (m *SessionManager) RecordLoginAttempt(ip string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if _, exists := m.loginAttempts[ip]; !exists && len(m.loginAttempts) >= maxTrackedIPs {
+		return
+	}
 	m.loginAttempts[ip] = append(m.loginAttempts[ip], time.Now())
 }
 

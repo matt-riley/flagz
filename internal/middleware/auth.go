@@ -103,7 +103,14 @@ func authorizeHTTP(ctx context.Context, authorizationHeader string, validator To
 	if err != nil {
 		return "", err
 	}
-	return validator.ValidateToken(ctx, token)
+	projectID, err := validator.ValidateToken(ctx, token)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(projectID) == "" {
+		return "", errInvalidAuthorizationHeader
+	}
+	return projectID, nil
 }
 
 func authorizeGRPC(ctx context.Context, validator TokenValidator) (string, error) {
@@ -128,6 +135,9 @@ func authorizeGRPC(ctx context.Context, validator TokenValidator) (string, error
 		}
 		projectID, err := validator.ValidateToken(ctx, token)
 		if err == nil {
+			if strings.TrimSpace(projectID) == "" {
+				continue
+			}
 			return projectID, nil
 		}
 	}

@@ -31,6 +31,7 @@ type Config struct {
 	HTTPAddr           string
 	GRPCAddr           string
 	StreamPollInterval time.Duration
+	LogLevel           string
 	AdminHostname      string
 	TSAuthKey          string
 	TSStateDir         string
@@ -74,6 +75,7 @@ func Load() (Config, error) {
 		HTTPAddr:           envOrDefault("HTTP_ADDR", defaultHTTPAddr),
 		GRPCAddr:           envOrDefault("GRPC_ADDR", defaultGRPCAddr),
 		StreamPollInterval: streamPollInterval,
+		LogLevel:           envOrDefault("LOG_LEVEL", "info"),
 		AdminHostname:      adminHostname, // Default to empty (disabled)
 		TSAuthKey:          os.Getenv("TS_AUTH_KEY"),
 		TSStateDir:         envOrDefault("TS_STATE_DIR", defaultTSStateDir),

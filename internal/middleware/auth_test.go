@@ -83,6 +83,46 @@ func TestHTTPBearerAuthMiddleware(t *testing.T) {
 		}
 	})
 
+	t.Run("valid token with empty project ID", func(t *testing.T) {
+		validator := &testTokenValidator{expectedToken: "good", projectID: ""}
+		nextCalled := false
+		handler := HTTPBearerAuthMiddleware(validator)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			nextCalled = true
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer good")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+		if nextCalled {
+			t.Fatal("expected next handler not to be called")
+		}
+	})
+
+	t.Run("valid token with whitespace project ID", func(t *testing.T) {
+		validator := &testTokenValidator{expectedToken: "good", projectID: "   "}
+		nextCalled := false
+		handler := HTTPBearerAuthMiddleware(validator)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			nextCalled = true
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer good")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+		if nextCalled {
+			t.Fatal("expected next handler not to be called")
+		}
+	})
+
 	t.Run("valid token", func(t *testing.T) {
 		validator := &testTokenValidator{expectedToken: "good", projectID: "proj-123"}
 		handler := HTTPBearerAuthMiddleware(validator)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -152,6 +192,25 @@ func TestUnaryBearerAuthInterceptor(t *testing.T) {
 		}
 		if !validator.called {
 			t.Fatal("expected validator to be called")
+		}
+	})
+
+	t.Run("valid token with empty project ID returns unauthenticated", func(t *testing.T) {
+		validator := &testTokenValidator{expectedToken: "good", projectID: ""}
+		interceptor := UnaryBearerAuthInterceptor(validator)
+		handlerCalled := false
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer good"))
+
+		_, err := interceptor(ctx, struct{}{}, &grpc.UnaryServerInfo{}, func(context.Context, any) (any, error) {
+			handlerCalled = true
+			return nil, nil
+		})
+
+		if status.Code(err) != codes.Unauthenticated {
+			t.Fatalf("expected unauthenticated, got %v", status.Code(err))
+		}
+		if handlerCalled {
+			t.Fatal("expected handler not to be called")
 		}
 	})
 
