@@ -4,9 +4,7 @@ package integration
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +20,8 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/matt-riley/flagz/internal/repository"
 )
@@ -136,10 +136,14 @@ func insertAPIKey(t *testing.T, projectID string) (string, string) {
 	t.Helper()
 	keyID := fmt.Sprintf("key-%d", time.Now().UnixNano())
 	rawSecret := fmt.Sprintf("secret-%d", time.Now().UnixNano())
-	hash := sha256.Sum256([]byte(rawSecret))
-	keyHash := hex.EncodeToString(hash[:])
+	// Use bcrypt (current production format) rather than SHA-256 (legacy).
+	hashBytes, err := bcrypt.GenerateFromPassword([]byte(rawSecret), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("failed to hash API key: %v", err)
+	}
+	keyHash := string(hashBytes)
 
-	_, err := testPool.Exec(context.Background(), `
+	_, err = testPool.Exec(context.Background(), `
 		INSERT INTO api_keys (id, project_id, name, key_hash)
 		VALUES ($1, $2, $3, $4)
 	`, keyID, projectID, "test-key", keyHash)
@@ -478,10 +482,8 @@ func TestAPIKeyValidation(t *testing.T) {
 			t.Errorf("projectID = %q, want %q", projectID, project.ID)
 		}
 
-		expected := sha256.Sum256([]byte(rawSecret))
-		expectedHex := hex.EncodeToString(expected[:])
-		if keyHash != expectedHex {
-			t.Errorf("key hash mismatch: got %q, computed %q", keyHash, expectedHex)
+		if err := bcrypt.CompareHashAndPassword([]byte(keyHash), []byte(rawSecret)); err != nil {
+			t.Errorf("bcrypt hash mismatch: %v", err)
 		}
 	})
 
