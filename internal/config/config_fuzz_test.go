@@ -46,6 +46,7 @@ func FuzzLoadStreamPollInterval(f *testing.F) {
 		}
 
 		t.Setenv("DATABASE_URL", "postgres://localhost/test")
+		t.Setenv("SESSION_SECRET", "test-secret")
 		t.Setenv("HTTP_ADDR", "")
 		t.Setenv("GRPC_ADDR", "")
 		t.Setenv("STREAM_POLL_INTERVAL", streamPollInterval)

@@ -11,13 +11,19 @@ import (
 	"time"
 
 	"github.com/matt-riley/flagz/internal/core"
+	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 	"github.com/matt-riley/flagz/internal/service"
 )
 
+func reqWithProject(req *http.Request) *http.Request {
+	ctx := middleware.NewContextWithProjectID(req.Context(), "default")
+	return req.WithContext(ctx)
+}
+
 func TestHTTPHandlerGetFlag(t *testing.T) {
 	svc := &fakeService{
-		getFlagFunc: func(_ context.Context, key string) (repository.Flag, error) {
+		getFlagFunc: func(_ context.Context, _, key string) (repository.Flag, error) {
 			if key != "new-ui" {
 				t.Fatalf("GetFlag key = %q, want %q", key, "new-ui")
 			}
@@ -32,7 +38,7 @@ func TestHTTPHandlerGetFlag(t *testing.T) {
 	}
 
 	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
-	req := httptest.NewRequest(http.MethodGet, "/v1/flags/new-ui", nil)
+	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/flags/new-ui", nil))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -54,7 +60,7 @@ func TestHTTPHandlerGetFlag(t *testing.T) {
 
 func TestHTTPHandlerListFlags(t *testing.T) {
 	svc := &fakeService{
-		listFlagsFunc: func(_ context.Context) ([]repository.Flag, error) {
+		listFlagsFunc: func(_ context.Context, _ string) ([]repository.Flag, error) {
 			return []repository.Flag{
 				{
 					Key:         "new-ui",
@@ -66,7 +72,7 @@ func TestHTTPHandlerListFlags(t *testing.T) {
 	}
 
 	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
-	req := httptest.NewRequest(http.MethodGet, "/v1/flags", nil)
+	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/flags", nil))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -95,7 +101,7 @@ func TestHTTPHandlerCreateFlagOversizedBody(t *testing.T) {
 	body := `{"key":"new-ui","description":"` + oversizedDescription + `"}`
 
 	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
-	req := httptest.NewRequest(http.MethodPost, "/v1/flags", strings.NewReader(body))
+	req := reqWithProject(httptest.NewRequest(http.MethodPost, "/v1/flags", strings.NewReader(body)))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -115,7 +121,7 @@ func TestHTTPHandlerCreateFlagInvalidRulesReturnsBadRequest(t *testing.T) {
 	}
 
 	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
-	req := httptest.NewRequest(http.MethodPost, "/v1/flags", strings.NewReader(`{"key":"new-ui","rules":"invalid"}`))
+	req := reqWithProject(httptest.NewRequest(http.MethodPost, "/v1/flags", strings.NewReader(`{"key":"new-ui","rules":"invalid"}`)))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -135,7 +141,7 @@ func TestHTTPHandlerCreateFlagInvalidVariantsReturnsBadRequest(t *testing.T) {
 	}
 
 	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
-	req := httptest.NewRequest(http.MethodPost, "/v1/flags", strings.NewReader(`{"key":"new-ui"}`))
+	req := reqWithProject(httptest.NewRequest(http.MethodPost, "/v1/flags", strings.NewReader(`{"key":"new-ui"}`)))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -150,7 +156,7 @@ func TestHTTPHandlerCreateFlagInvalidVariantsReturnsBadRequest(t *testing.T) {
 func TestHTTPHandlerStreamReplaysFromLastEventID(t *testing.T) {
 	sinceCalls := make([]int64, 0)
 	svc := &fakeService{
-		listEventsSinceFunc: func(_ context.Context, since int64) ([]repository.FlagEvent, error) {
+		listEventsSinceFunc: func(_ context.Context, _ string, since int64) ([]repository.FlagEvent, error) {
 			sinceCalls = append(sinceCalls, since)
 			if since != 1 {
 				return nil, nil
@@ -176,7 +182,7 @@ func TestHTTPHandlerStreamReplaysFromLastEventID(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/stream", nil).WithContext(ctx)
+	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/stream", nil).WithContext(ctx))
 	req.Header.Set("Last-Event-ID", "1")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -199,7 +205,7 @@ func TestHTTPHandlerStreamReplaysFromLastEventID(t *testing.T) {
 
 func TestHTTPHandlerStreamCompactsPayloadToSingleDataLine(t *testing.T) {
 	svc := &fakeService{
-		listEventsSinceFunc: func(_ context.Context, since int64) ([]repository.FlagEvent, error) {
+		listEventsSinceFunc: func(_ context.Context, _ string, since int64) ([]repository.FlagEvent, error) {
 			if since != 0 {
 				return nil, nil
 			}
@@ -219,7 +225,7 @@ func TestHTTPHandlerStreamCompactsPayloadToSingleDataLine(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/stream", nil).WithContext(ctx)
+	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/stream", nil).WithContext(ctx))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -238,13 +244,13 @@ func TestHTTPHandlerStreamCompactsPayloadToSingleDataLine(t *testing.T) {
 
 func TestHTTPHandlerStreamInitialFetchErrorReturnsHTTPError(t *testing.T) {
 	svc := &fakeService{
-		listEventsSinceFunc: func(_ context.Context, _ int64) ([]repository.FlagEvent, error) {
+		listEventsSinceFunc: func(_ context.Context, _ string, _ int64) ([]repository.FlagEvent, error) {
 			return nil, errors.New("backend failure")
 		},
 	}
 
 	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
-	req := httptest.NewRequest(http.MethodGet, "/v1/stream", nil)
+	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/stream", nil))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -261,7 +267,7 @@ func TestHTTPHandlerStreamInitialFetchErrorReturnsHTTPError(t *testing.T) {
 
 func TestHTTPHandlerStreamFlushesHeadersWithoutInitialEvents(t *testing.T) {
 	svc := &fakeService{
-		listEventsSinceFunc: func(_ context.Context, _ int64) ([]repository.FlagEvent, error) {
+		listEventsSinceFunc: func(_ context.Context, _ string, _ int64) ([]repository.FlagEvent, error) {
 			return nil, nil
 		},
 	}
@@ -270,7 +276,7 @@ func TestHTTPHandlerStreamFlushesHeadersWithoutInitialEvents(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/stream", nil).WithContext(ctx)
+	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/stream", nil).WithContext(ctx))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -288,7 +294,7 @@ func TestHTTPHandlerStreamFlushesHeadersWithoutInitialEvents(t *testing.T) {
 func TestHTTPHandlerStreamSendsSSEErrorAfterStartOnBackendFailure(t *testing.T) {
 	callCount := 0
 	svc := &fakeService{
-		listEventsSinceFunc: func(_ context.Context, _ int64) ([]repository.FlagEvent, error) {
+		listEventsSinceFunc: func(_ context.Context, _ string, _ int64) ([]repository.FlagEvent, error) {
 			callCount++
 			switch callCount {
 			case 1:
@@ -312,7 +318,7 @@ func TestHTTPHandlerStreamSendsSSEErrorAfterStartOnBackendFailure(t *testing.T) 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/stream", nil).WithContext(ctx)
+	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/stream", nil).WithContext(ctx))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -334,13 +340,13 @@ func TestHTTPHandlerStreamSendsSSEErrorAfterStartOnBackendFailure(t *testing.T) 
 type fakeService struct {
 	createFlagFunc            func(ctx context.Context, flag repository.Flag) (repository.Flag, error)
 	updateFlagFunc            func(ctx context.Context, flag repository.Flag) (repository.Flag, error)
-	getFlagFunc               func(ctx context.Context, key string) (repository.Flag, error)
-	listFlagsFunc             func(ctx context.Context) ([]repository.Flag, error)
-	deleteFlagFunc            func(ctx context.Context, key string) error
-	resolveBooleanFunc        func(ctx context.Context, key string, evalContext core.EvaluationContext, defaultValue bool) (bool, error)
+	getFlagFunc               func(ctx context.Context, projectID, key string) (repository.Flag, error)
+	listFlagsFunc             func(ctx context.Context, projectID string) ([]repository.Flag, error)
+	deleteFlagFunc            func(ctx context.Context, projectID, key string) error
+	resolveBooleanFunc        func(ctx context.Context, projectID, key string, evalContext core.EvaluationContext, defaultValue bool) (bool, error)
 	resolveBatchFunc          func(ctx context.Context, requests []service.ResolveRequest) ([]service.ResolveResult, error)
-	listEventsSinceFunc       func(ctx context.Context, eventID int64) ([]repository.FlagEvent, error)
-	listEventsSinceForKeyFunc func(ctx context.Context, eventID int64, key string) ([]repository.FlagEvent, error)
+	listEventsSinceFunc       func(ctx context.Context, projectID string, eventID int64) ([]repository.FlagEvent, error)
+	listEventsSinceForKeyFunc func(ctx context.Context, projectID string, eventID int64, key string) ([]repository.FlagEvent, error)
 }
 
 func (f *fakeService) CreateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error) {
@@ -357,30 +363,30 @@ func (f *fakeService) UpdateFlag(ctx context.Context, flag repository.Flag) (rep
 	return repository.Flag{}, errors.New("UpdateFlag not implemented")
 }
 
-func (f *fakeService) GetFlag(ctx context.Context, key string) (repository.Flag, error) {
+func (f *fakeService) GetFlag(ctx context.Context, projectID, key string) (repository.Flag, error) {
 	if f.getFlagFunc != nil {
-		return f.getFlagFunc(ctx, key)
+		return f.getFlagFunc(ctx, projectID, key)
 	}
 	return repository.Flag{}, errors.New("GetFlag not implemented")
 }
 
-func (f *fakeService) ListFlags(ctx context.Context) ([]repository.Flag, error) {
+func (f *fakeService) ListFlags(ctx context.Context, projectID string) ([]repository.Flag, error) {
 	if f.listFlagsFunc != nil {
-		return f.listFlagsFunc(ctx)
+		return f.listFlagsFunc(ctx, projectID)
 	}
 	return nil, errors.New("ListFlags not implemented")
 }
 
-func (f *fakeService) DeleteFlag(ctx context.Context, key string) error {
+func (f *fakeService) DeleteFlag(ctx context.Context, projectID, key string) error {
 	if f.deleteFlagFunc != nil {
-		return f.deleteFlagFunc(ctx, key)
+		return f.deleteFlagFunc(ctx, projectID, key)
 	}
 	return errors.New("DeleteFlag not implemented")
 }
 
-func (f *fakeService) ResolveBoolean(ctx context.Context, key string, evalContext core.EvaluationContext, defaultValue bool) (bool, error) {
+func (f *fakeService) ResolveBoolean(ctx context.Context, projectID, key string, evalContext core.EvaluationContext, defaultValue bool) (bool, error) {
 	if f.resolveBooleanFunc != nil {
-		return f.resolveBooleanFunc(ctx, key, evalContext, defaultValue)
+		return f.resolveBooleanFunc(ctx, projectID, key, evalContext, defaultValue)
 	}
 	return false, errors.New("ResolveBoolean not implemented")
 }
@@ -392,16 +398,16 @@ func (f *fakeService) ResolveBatch(ctx context.Context, requests []service.Resol
 	return nil, errors.New("ResolveBatch not implemented")
 }
 
-func (f *fakeService) ListEventsSince(ctx context.Context, eventID int64) ([]repository.FlagEvent, error) {
+func (f *fakeService) ListEventsSince(ctx context.Context, projectID string, eventID int64) ([]repository.FlagEvent, error) {
 	if f.listEventsSinceFunc != nil {
-		return f.listEventsSinceFunc(ctx, eventID)
+		return f.listEventsSinceFunc(ctx, projectID, eventID)
 	}
 	return nil, errors.New("ListEventsSince not implemented")
 }
 
-func (f *fakeService) ListEventsSinceForKey(ctx context.Context, eventID int64, key string) ([]repository.FlagEvent, error) {
+func (f *fakeService) ListEventsSinceForKey(ctx context.Context, projectID string, eventID int64, key string) ([]repository.FlagEvent, error) {
 	if f.listEventsSinceForKeyFunc != nil {
-		return f.listEventsSinceForKeyFunc(ctx, eventID, key)
+		return f.listEventsSinceForKeyFunc(ctx, projectID, eventID, key)
 	}
 	return nil, errors.New("ListEventsSinceForKey not implemented")
 }

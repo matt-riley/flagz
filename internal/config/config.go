@@ -22,6 +22,7 @@ const (
 	defaultHTTPAddr           = ":8080"
 	defaultGRPCAddr           = ":9090"
 	defaultStreamPollInterval = time.Second
+	defaultTSStateDir         = "tsnet-state"
 )
 
 // Config holds the runtime configuration for the flagz server.
@@ -30,6 +31,10 @@ type Config struct {
 	HTTPAddr           string
 	GRPCAddr           string
 	StreamPollInterval time.Duration
+	AdminHostname      string
+	TSAuthKey          string
+	TSStateDir         string
+	SessionSecret      string
 }
 
 // Load reads configuration from environment variables, applying defaults where
@@ -40,6 +45,8 @@ func Load() (Config, error) {
 	if databaseURL == "" {
 		return Config{}, errors.New("DATABASE_URL is required")
 	}
+
+	sessionSecret := strings.TrimSpace(os.Getenv("SESSION_SECRET"))
 
 	streamPollInterval := defaultStreamPollInterval
 	if value := strings.TrimSpace(os.Getenv("STREAM_POLL_INTERVAL")); value != "" {
@@ -53,11 +60,24 @@ func Load() (Config, error) {
 		streamPollInterval = parsed
 	}
 
+	// Admin Portal Config
+	adminHostname := strings.TrimSpace(os.Getenv("ADMIN_HOSTNAME"))
+	if adminHostname != "" && sessionSecret == "" {
+		return Config{}, errors.New("SESSION_SECRET is required when ADMIN_HOSTNAME is set")
+	}
+	if adminHostname != "" && len(sessionSecret) < 32 {
+		return Config{}, errors.New("SESSION_SECRET must be at least 32 characters when ADMIN_HOSTNAME is set")
+	}
+
 	return Config{
 		DatabaseURL:        databaseURL,
 		HTTPAddr:           envOrDefault("HTTP_ADDR", defaultHTTPAddr),
 		GRPCAddr:           envOrDefault("GRPC_ADDR", defaultGRPCAddr),
 		StreamPollInterval: streamPollInterval,
+		AdminHostname:      adminHostname, // Default to empty (disabled)
+		TSAuthKey:          os.Getenv("TS_AUTH_KEY"),
+		TSStateDir:         envOrDefault("TS_STATE_DIR", defaultTSStateDir),
+		SessionSecret:      sessionSecret,
 	}, nil
 }
 

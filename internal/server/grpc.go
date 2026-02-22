@@ -10,6 +10,7 @@ import (
 
 	flagspb "github.com/matt-riley/flagz/api/proto/v1"
 	"github.com/matt-riley/flagz/internal/core"
+	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 	"github.com/matt-riley/flagz/internal/service"
 	"google.golang.org/grpc/codes"
@@ -50,6 +51,11 @@ func NewGRPCServerWithStreamPollInterval(svc Service, streamPollInterval time.Du
 }
 
 func (s *GRPCServer) CreateFlag(ctx context.Context, req *flagspb.CreateFlagRequest) (*flagspb.CreateFlagResponse, error) {
+	projectID, ok := middleware.ProjectIDFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+	}
+
 	if req == nil || req.GetFlag() == nil {
 		return nil, status.Error(codes.InvalidArgument, "flag is required")
 	}
@@ -57,7 +63,10 @@ func (s *GRPCServer) CreateFlag(ctx context.Context, req *flagspb.CreateFlagRequ
 		return nil, status.Error(codes.InvalidArgument, "key is required")
 	}
 
-	created, err := s.service.CreateFlag(ctx, protoFlagToRepository(req.GetFlag()))
+	flag := protoFlagToRepository(req.GetFlag())
+	flag.ProjectID = projectID
+
+	created, err := s.service.CreateFlag(ctx, flag)
 	if err != nil {
 		return nil, toGRPCError(err)
 	}
@@ -66,6 +75,11 @@ func (s *GRPCServer) CreateFlag(ctx context.Context, req *flagspb.CreateFlagRequ
 }
 
 func (s *GRPCServer) UpdateFlag(ctx context.Context, req *flagspb.UpdateFlagRequest) (*flagspb.UpdateFlagResponse, error) {
+	projectID, ok := middleware.ProjectIDFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+	}
+
 	if req == nil || req.GetFlag() == nil {
 		return nil, status.Error(codes.InvalidArgument, "flag is required")
 	}
@@ -73,7 +87,10 @@ func (s *GRPCServer) UpdateFlag(ctx context.Context, req *flagspb.UpdateFlagRequ
 		return nil, status.Error(codes.InvalidArgument, "key is required")
 	}
 
-	updated, err := s.service.UpdateFlag(ctx, protoFlagToRepository(req.GetFlag()))
+	flag := protoFlagToRepository(req.GetFlag())
+	flag.ProjectID = projectID
+
+	updated, err := s.service.UpdateFlag(ctx, flag)
 	if err != nil {
 		return nil, toGRPCError(err)
 	}
@@ -82,11 +99,16 @@ func (s *GRPCServer) UpdateFlag(ctx context.Context, req *flagspb.UpdateFlagRequ
 }
 
 func (s *GRPCServer) GetFlag(ctx context.Context, req *flagspb.GetFlagRequest) (*flagspb.GetFlagResponse, error) {
+	projectID, ok := middleware.ProjectIDFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+	}
+
 	if req == nil || strings.TrimSpace(req.GetKey()) == "" {
 		return nil, status.Error(codes.InvalidArgument, "key is required")
 	}
 
-	flag, err := s.service.GetFlag(ctx, req.GetKey())
+	flag, err := s.service.GetFlag(ctx, projectID, req.GetKey())
 	if err != nil {
 		return nil, toGRPCError(err)
 	}
@@ -95,7 +117,12 @@ func (s *GRPCServer) GetFlag(ctx context.Context, req *flagspb.GetFlagRequest) (
 }
 
 func (s *GRPCServer) ListFlags(ctx context.Context, req *flagspb.ListFlagsRequest) (*flagspb.ListFlagsResponse, error) {
-	flags, err := s.service.ListFlags(ctx)
+	projectID, ok := middleware.ProjectIDFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+	}
+
+	flags, err := s.service.ListFlags(ctx, projectID)
 	if err != nil {
 		return nil, toGRPCError(err)
 	}
@@ -141,11 +168,16 @@ func (s *GRPCServer) ListFlags(ctx context.Context, req *flagspb.ListFlagsReques
 }
 
 func (s *GRPCServer) DeleteFlag(ctx context.Context, req *flagspb.DeleteFlagRequest) (*flagspb.DeleteFlagResponse, error) {
+	projectID, ok := middleware.ProjectIDFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+	}
+
 	if req == nil || strings.TrimSpace(req.GetKey()) == "" {
 		return nil, status.Error(codes.InvalidArgument, "key is required")
 	}
 
-	if err := s.service.DeleteFlag(ctx, req.GetKey()); err != nil {
+	if err := s.service.DeleteFlag(ctx, projectID, req.GetKey()); err != nil {
 		return nil, toGRPCError(err)
 	}
 
@@ -153,6 +185,11 @@ func (s *GRPCServer) DeleteFlag(ctx context.Context, req *flagspb.DeleteFlagRequ
 }
 
 func (s *GRPCServer) ResolveBoolean(ctx context.Context, req *flagspb.ResolveBooleanRequest) (*flagspb.ResolveBooleanResponse, error) {
+	projectID, ok := middleware.ProjectIDFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+	}
+
 	if req == nil || strings.TrimSpace(req.GetKey()) == "" {
 		return nil, status.Error(codes.InvalidArgument, "key is required")
 	}
@@ -162,7 +199,7 @@ func (s *GRPCServer) ResolveBoolean(ctx context.Context, req *flagspb.ResolveBoo
 		return nil, status.Error(codes.InvalidArgument, "invalid context_json")
 	}
 
-	value, err := s.service.ResolveBoolean(ctx, req.GetKey(), evalContext, req.GetDefaultValue())
+	value, err := s.service.ResolveBoolean(ctx, projectID, req.GetKey(), evalContext, req.GetDefaultValue())
 	if err != nil {
 		return nil, toGRPCError(err)
 	}
@@ -174,6 +211,11 @@ func (s *GRPCServer) ResolveBoolean(ctx context.Context, req *flagspb.ResolveBoo
 }
 
 func (s *GRPCServer) ResolveBatch(ctx context.Context, req *flagspb.ResolveBatchRequest) (*flagspb.ResolveBatchResponse, error) {
+	projectID, ok := middleware.ProjectIDFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+	}
+
 	if req == nil || len(req.GetRequests()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "requests are required")
 	}
@@ -190,6 +232,7 @@ func (s *GRPCServer) ResolveBatch(ctx context.Context, req *flagspb.ResolveBatch
 		}
 
 		requests = append(requests, service.ResolveRequest{
+			ProjectID:    projectID,
 			Key:          request.GetKey(),
 			Context:      evalContext,
 			DefaultValue: request.GetDefaultValue(),
@@ -213,6 +256,11 @@ func (s *GRPCServer) ResolveBatch(ctx context.Context, req *flagspb.ResolveBatch
 }
 
 func (s *GRPCServer) WatchFlag(req *flagspb.WatchFlagRequest, stream flagspb.FlagService_WatchFlagServer) error {
+	projectID, ok := middleware.ProjectIDFromContext(stream.Context())
+	if !ok {
+		return status.Error(codes.Unauthenticated, "unauthenticated")
+	}
+
 	filterKey := ""
 	var lastEventID int64
 	if req != nil {
@@ -223,10 +271,13 @@ func (s *GRPCServer) WatchFlag(req *flagspb.WatchFlagRequest, stream flagspb.Fla
 		return status.Error(codes.InvalidArgument, "last_event_id must be non-negative")
 	}
 
-	listEventsSince := s.service.ListEventsSince
+	listEventsSince := func(ctx context.Context, eventID int64) ([]repository.FlagEvent, error) {
+		return s.service.ListEventsSince(ctx, projectID, eventID)
+	}
+
 	if filterKey != "" {
 		listEventsSince = func(ctx context.Context, eventID int64) ([]repository.FlagEvent, error) {
-			return s.service.ListEventsSinceForKey(ctx, eventID, filterKey)
+			return s.service.ListEventsSinceForKey(ctx, projectID, eventID, filterKey)
 		}
 	}
 
@@ -284,7 +335,9 @@ func toGRPCError(err error) error {
 		return status.Error(codes.InvalidArgument, "invalid rules")
 	case errors.Is(err, service.ErrInvalidVariants):
 		return status.Error(codes.InvalidArgument, "invalid variants")
-	case isInvalidArgumentError(err):
+	case errors.Is(err, service.ErrFlagKeyRequired):
+		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, service.ErrProjectIDRequired):
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, service.ErrFlagNotFound):
 		return status.Error(codes.NotFound, "flag not found")
@@ -295,14 +348,6 @@ func toGRPCError(err error) error {
 	default:
 		return status.Error(codes.Internal, "internal server error")
 	}
-}
-
-func isInvalidArgumentError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	return strings.EqualFold(strings.TrimSpace(err.Error()), "flag key is required")
 }
 
 func parseListPageToken(pageToken string, maxOffset int) (int, error) {

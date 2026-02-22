@@ -23,6 +23,7 @@ func TestServiceCRUDAndEvaluation(t *testing.T) {
 	}
 
 	flag := repository.Flag{
+		ProjectID:   "default",
 		Key:         "new-ui",
 		Description: "initial rollout",
 		Enabled:     true,
@@ -33,7 +34,7 @@ func TestServiceCRUDAndEvaluation(t *testing.T) {
 		t.Fatalf("CreateFlag() error = %v", err)
 	}
 
-	got, err := svc.GetFlag(ctx, "new-ui")
+	got, err := svc.GetFlag(ctx, "default", "new-ui")
 	if err != nil {
 		t.Fatalf("GetFlag() error = %v", err)
 	}
@@ -41,7 +42,7 @@ func TestServiceCRUDAndEvaluation(t *testing.T) {
 		t.Fatalf("GetFlag().Description = %q, want %q", got.Description, "initial rollout")
 	}
 
-	value, err := svc.ResolveBoolean(ctx, "new-ui", core.EvaluationContext{
+	value, err := svc.ResolveBoolean(ctx, "default", "new-ui", core.EvaluationContext{
 		Attributes: map[string]any{"country": "US"},
 	}, false)
 	if err != nil {
@@ -51,7 +52,7 @@ func TestServiceCRUDAndEvaluation(t *testing.T) {
 		t.Fatalf("ResolveBoolean() = %t, want true", value)
 	}
 
-	value, err = svc.ResolveBoolean(ctx, "new-ui", core.EvaluationContext{
+	value, err = svc.ResolveBoolean(ctx, "default", "new-ui", core.EvaluationContext{
 		Attributes: map[string]any{"country": "CA"},
 	}, true)
 	if err != nil {
@@ -61,7 +62,7 @@ func TestServiceCRUDAndEvaluation(t *testing.T) {
 		t.Fatalf("ResolveBoolean() = %t, want true on rule mismatch fallback", value)
 	}
 
-	missing, err := svc.ResolveBoolean(ctx, "missing", core.EvaluationContext{}, true)
+	missing, err := svc.ResolveBoolean(ctx, "default", "missing", core.EvaluationContext{}, true)
 	if err != nil {
 		t.Fatalf("ResolveBoolean(missing) error = %v", err)
 	}
@@ -71,13 +72,15 @@ func TestServiceCRUDAndEvaluation(t *testing.T) {
 
 	batch, err := svc.ResolveBatch(ctx, []ResolveRequest{
 		{
-			Key: "new-ui",
+			ProjectID: "default",
+			Key:       "new-ui",
 			Context: core.EvaluationContext{
 				Attributes: map[string]any{"country": "US"},
 			},
 			DefaultValue: false,
 		},
 		{
+			ProjectID:    "default",
 			Key:          "unknown",
 			DefaultValue: true,
 		},
@@ -94,7 +97,7 @@ func TestServiceCRUDAndEvaluation(t *testing.T) {
 		t.Fatalf("UpdateFlag() error = %v", err)
 	}
 
-	flags, err := svc.ListFlags(ctx)
+	flags, err := svc.ListFlags(ctx, "default")
 	if err != nil {
 		t.Fatalf("ListFlags() error = %v", err)
 	}
@@ -102,11 +105,11 @@ func TestServiceCRUDAndEvaluation(t *testing.T) {
 		t.Fatalf("ListFlags() = %#v, want single updated flag", flags)
 	}
 
-	if err := svc.DeleteFlag(ctx, "new-ui"); err != nil {
+	if err := svc.DeleteFlag(ctx, "default", "new-ui"); err != nil {
 		t.Fatalf("DeleteFlag() error = %v", err)
 	}
 
-	if _, err := svc.GetFlag(ctx, "new-ui"); !errors.Is(err, ErrFlagNotFound) {
+	if _, err := svc.GetFlag(ctx, "default", "new-ui"); !errors.Is(err, ErrFlagNotFound) {
 		t.Fatalf("GetFlag() error = %v, want %v", err, ErrFlagNotFound)
 	}
 
@@ -132,6 +135,7 @@ func TestServiceMutationSucceedsWhenPublishFails(t *testing.T) {
 	}
 
 	flag := repository.Flag{
+		ProjectID:   "default",
 		Key:         "new-ui",
 		Description: "initial rollout",
 		Enabled:     true,
@@ -152,11 +156,11 @@ func TestServiceMutationSucceedsWhenPublishFails(t *testing.T) {
 		t.Fatalf("UpdateFlag() error = %v, want nil when publish fails", err)
 	}
 
-	if err := svc.DeleteFlag(ctx, flag.Key); err != nil {
+	if err := svc.DeleteFlag(ctx, "default", flag.Key); err != nil {
 		t.Fatalf("DeleteFlag() error = %v, want nil when publish fails", err)
 	}
 
-	if _, err := svc.GetFlag(ctx, flag.Key); !errors.Is(err, ErrFlagNotFound) {
+	if _, err := svc.GetFlag(ctx, "default", flag.Key); !errors.Is(err, ErrFlagNotFound) {
 		t.Fatalf("GetFlag() error = %v, want %v", err, ErrFlagNotFound)
 	}
 }
@@ -165,8 +169,9 @@ func TestServiceUpdateFlagEvictsStaleCacheOnNotFound(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeServiceRepository()
 	flag := repository.Flag{
-		Key:     "new-ui",
-		Enabled: true,
+		ProjectID: "default",
+		Key:       "new-ui",
+		Enabled:   true,
 	}
 	repo.setFlag(flag)
 
@@ -177,6 +182,7 @@ func TestServiceUpdateFlagEvictsStaleCacheOnNotFound(t *testing.T) {
 
 	repo.removeFlag(flag.Key)
 	_, err = svc.UpdateFlag(ctx, repository.Flag{
+		ProjectID:   "default",
 		Key:         flag.Key,
 		Description: "updated",
 		Enabled:     true,
@@ -185,7 +191,7 @@ func TestServiceUpdateFlagEvictsStaleCacheOnNotFound(t *testing.T) {
 		t.Fatalf("UpdateFlag() error = %v, want %v", err, ErrFlagNotFound)
 	}
 
-	if _, err := svc.GetFlag(ctx, flag.Key); !errors.Is(err, ErrFlagNotFound) {
+	if _, err := svc.GetFlag(ctx, "default", flag.Key); !errors.Is(err, ErrFlagNotFound) {
 		t.Fatalf("GetFlag() error = %v, want %v", err, ErrFlagNotFound)
 	}
 }
@@ -194,8 +200,9 @@ func TestServiceDeleteFlagEvictsStaleCacheOnNotFound(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeServiceRepository()
 	flag := repository.Flag{
-		Key:     "new-ui",
-		Enabled: true,
+		ProjectID: "default",
+		Key:       "new-ui",
+		Enabled:   true,
 	}
 	repo.setFlag(flag)
 
@@ -205,11 +212,11 @@ func TestServiceDeleteFlagEvictsStaleCacheOnNotFound(t *testing.T) {
 	}
 
 	repo.removeFlag(flag.Key)
-	if err := svc.DeleteFlag(ctx, flag.Key); !errors.Is(err, ErrFlagNotFound) {
+	if err := svc.DeleteFlag(ctx, "default", flag.Key); !errors.Is(err, ErrFlagNotFound) {
 		t.Fatalf("DeleteFlag() error = %v, want %v", err, ErrFlagNotFound)
 	}
 
-	if _, err := svc.GetFlag(ctx, flag.Key); !errors.Is(err, ErrFlagNotFound) {
+	if _, err := svc.GetFlag(ctx, "default", flag.Key); !errors.Is(err, ErrFlagNotFound) {
 		t.Fatalf("GetFlag() error = %v, want %v", err, ErrFlagNotFound)
 	}
 }
@@ -225,6 +232,7 @@ func TestServiceRejectsInvalidRules(t *testing.T) {
 		}
 
 		_, err = svc.CreateFlag(ctx, repository.Flag{
+			ProjectID:   "default",
 			Key:         "new-ui",
 			Description: "initial rollout",
 			Enabled:     true,
@@ -235,7 +243,7 @@ func TestServiceRejectsInvalidRules(t *testing.T) {
 			t.Fatalf("CreateFlag() error = %v, want %v", err, ErrInvalidRules)
 		}
 
-		flags, err := svc.ListFlags(ctx)
+		flags, err := svc.ListFlags(ctx, "default")
 		if err != nil {
 			t.Fatalf("ListFlags() error = %v", err)
 		}
@@ -247,6 +255,7 @@ func TestServiceRejectsInvalidRules(t *testing.T) {
 	t.Run("update", func(t *testing.T) {
 		repo := newFakeServiceRepository()
 		repo.setFlag(repository.Flag{
+			ProjectID:   "default",
 			Key:         "new-ui",
 			Description: "initial rollout",
 			Enabled:     true,
@@ -259,6 +268,7 @@ func TestServiceRejectsInvalidRules(t *testing.T) {
 		}
 
 		_, err = svc.UpdateFlag(ctx, repository.Flag{
+			ProjectID:   "default",
 			Key:         "new-ui",
 			Description: "updated rollout",
 			Enabled:     true,
@@ -269,7 +279,7 @@ func TestServiceRejectsInvalidRules(t *testing.T) {
 			t.Fatalf("UpdateFlag() error = %v, want %v", err, ErrInvalidRules)
 		}
 
-		got, err := svc.GetFlag(ctx, "new-ui")
+		got, err := svc.GetFlag(ctx, "default", "new-ui")
 		if err != nil {
 			t.Fatalf("GetFlag() error = %v", err)
 		}
@@ -290,6 +300,7 @@ func TestServiceRejectsInvalidVariants(t *testing.T) {
 		}
 
 		_, err = svc.CreateFlag(ctx, repository.Flag{
+			ProjectID:   "default",
 			Key:         "new-ui",
 			Description: "initial rollout",
 			Enabled:     true,
@@ -300,7 +311,7 @@ func TestServiceRejectsInvalidVariants(t *testing.T) {
 			t.Fatalf("CreateFlag() error = %v, want %v", err, ErrInvalidVariants)
 		}
 
-		flags, err := svc.ListFlags(ctx)
+		flags, err := svc.ListFlags(ctx, "default")
 		if err != nil {
 			t.Fatalf("ListFlags() error = %v", err)
 		}
@@ -312,6 +323,7 @@ func TestServiceRejectsInvalidVariants(t *testing.T) {
 	t.Run("update", func(t *testing.T) {
 		repo := newFakeServiceRepository()
 		repo.setFlag(repository.Flag{
+			ProjectID:   "default",
 			Key:         "new-ui",
 			Description: "initial rollout",
 			Enabled:     true,
@@ -324,6 +336,7 @@ func TestServiceRejectsInvalidVariants(t *testing.T) {
 		}
 
 		_, err = svc.UpdateFlag(ctx, repository.Flag{
+			ProjectID:   "default",
 			Key:         "new-ui",
 			Description: "updated rollout",
 			Enabled:     true,
@@ -334,7 +347,7 @@ func TestServiceRejectsInvalidVariants(t *testing.T) {
 			t.Fatalf("UpdateFlag() error = %v, want %v", err, ErrInvalidVariants)
 		}
 
-		got, err := svc.GetFlag(ctx, "new-ui")
+		got, err := svc.GetFlag(ctx, "default", "new-ui")
 		if err != nil {
 			t.Fatalf("GetFlag() error = %v", err)
 		}
@@ -357,6 +370,7 @@ func TestServiceMutationPublishesWithDetachedContext(t *testing.T) {
 	cancel()
 
 	flag := repository.Flag{
+		ProjectID:   "default",
 		Key:         "new-ui",
 		Description: "initial rollout",
 		Enabled:     true,
@@ -386,6 +400,7 @@ func TestServiceRefreshesCacheFromInvalidations(t *testing.T) {
 
 	repo := newNotifyingFakeServiceRepository()
 	initial := repository.Flag{
+		ProjectID:   "default",
 		Key:         "new-ui",
 		Description: "initial rollout",
 		Enabled:     false,
@@ -404,7 +419,7 @@ func TestServiceRefreshesCacheFromInvalidations(t *testing.T) {
 	updated.Enabled = true
 	repo.setFlag(updated)
 
-	stale, err := svc.GetFlag(ctx, initial.Key)
+	stale, err := svc.GetFlag(ctx, "default", initial.Key)
 	if err != nil {
 		t.Fatalf("GetFlag() error = %v", err)
 	}
@@ -414,14 +429,14 @@ func TestServiceRefreshesCacheFromInvalidations(t *testing.T) {
 
 	repo.notifyInvalidation()
 	waitForCondition(t, time.Second, func() bool {
-		flag, err := svc.GetFlag(ctx, initial.Key)
+		flag, err := svc.GetFlag(ctx, "default", initial.Key)
 		return err == nil && flag.Description == updated.Description && flag.Enabled == updated.Enabled
 	})
 
 	repo.removeFlag(initial.Key)
 	repo.notifyInvalidation()
 	waitForCondition(t, time.Second, func() bool {
-		_, err := svc.GetFlag(ctx, initial.Key)
+		_, err := svc.GetFlag(ctx, "default", initial.Key)
 		return errors.Is(err, ErrFlagNotFound)
 	})
 }
@@ -430,6 +445,7 @@ func TestServiceResolveBooleanUsesVariantsDefaultFallback(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeServiceRepository()
 	repo.setFlag(repository.Flag{
+		ProjectID:   "default",
 		Key:         "new-ui",
 		Description: "rollout",
 		Enabled:     true,
@@ -442,7 +458,7 @@ func TestServiceResolveBooleanUsesVariantsDefaultFallback(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	mismatch, err := svc.ResolveBoolean(ctx, "new-ui", core.EvaluationContext{
+	mismatch, err := svc.ResolveBoolean(ctx, "default", "new-ui", core.EvaluationContext{
 		Attributes: map[string]any{"country": "CA"},
 	}, true)
 	if err != nil {
@@ -452,7 +468,7 @@ func TestServiceResolveBooleanUsesVariantsDefaultFallback(t *testing.T) {
 		t.Fatalf("ResolveBoolean() = %t, want false from variants.default fallback", mismatch)
 	}
 
-	match, err := svc.ResolveBoolean(ctx, "new-ui", core.EvaluationContext{
+	match, err := svc.ResolveBoolean(ctx, "default", "new-ui", core.EvaluationContext{
 		Attributes: map[string]any{"country": "US"},
 	}, false)
 	if err != nil {
@@ -469,6 +485,7 @@ func TestServiceResubscribesAfterInvalidationChannelClose(t *testing.T) {
 
 	repo := newResubscribingFakeServiceRepository()
 	initial := repository.Flag{
+		ProjectID:   "default",
 		Key:         "new-ui",
 		Description: "initial rollout",
 		Enabled:     false,
@@ -487,7 +504,7 @@ func TestServiceResubscribesAfterInvalidationChannelClose(t *testing.T) {
 	updated.Enabled = true
 	repo.setFlag(updated)
 
-	stale, err := svc.GetFlag(ctx, initial.Key)
+	stale, err := svc.GetFlag(ctx, "default", initial.Key)
 	if err != nil {
 		t.Fatalf("GetFlag() error = %v", err)
 	}
@@ -502,14 +519,14 @@ func TestServiceResubscribesAfterInvalidationChannelClose(t *testing.T) {
 
 	repo.notifyInvalidation()
 	waitForCondition(t, time.Second, func() bool {
-		flag, err := svc.GetFlag(ctx, initial.Key)
+		flag, err := svc.GetFlag(ctx, "default", initial.Key)
 		return err == nil && flag.Description == updated.Description && flag.Enabled == updated.Enabled
 	})
 }
 
 type fakeServiceRepository struct {
 	mu          sync.RWMutex
-	flags       map[string]repository.Flag
+	flags       map[string]map[string]repository.Flag
 	events      []repository.FlagEvent
 	nextEventID int64
 	publishErr  error
@@ -521,7 +538,7 @@ type fakeServiceRepository struct {
 
 func newFakeServiceRepository() *fakeServiceRepository {
 	return &fakeServiceRepository{
-		flags: make(map[string]repository.Flag),
+		flags: make(map[string]map[string]repository.Flag),
 	}
 }
 
@@ -529,7 +546,10 @@ func (f *fakeServiceRepository) CreateFlag(_ context.Context, flag repository.Fl
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	f.flags[flag.Key] = flag
+	if _, ok := f.flags[flag.ProjectID]; !ok {
+		f.flags[flag.ProjectID] = make(map[string]repository.Flag)
+	}
+	f.flags[flag.ProjectID][flag.Key] = flag
 	return flag, nil
 }
 
@@ -537,18 +557,26 @@ func (f *fakeServiceRepository) UpdateFlag(_ context.Context, flag repository.Fl
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if _, ok := f.flags[flag.Key]; !ok {
+	projectFlags, ok := f.flags[flag.ProjectID]
+	if !ok {
 		return repository.Flag{}, pgx.ErrNoRows
 	}
-	f.flags[flag.Key] = flag
+	if _, ok := projectFlags[flag.Key]; !ok {
+		return repository.Flag{}, pgx.ErrNoRows
+	}
+	f.flags[flag.ProjectID][flag.Key] = flag
 	return flag, nil
 }
 
-func (f *fakeServiceRepository) GetFlag(_ context.Context, key string) (repository.Flag, error) {
+func (f *fakeServiceRepository) GetFlag(_ context.Context, projectID, key string) (repository.Flag, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	flag, ok := f.flags[key]
+	projectFlags, ok := f.flags[projectID]
+	if !ok {
+		return repository.Flag{}, pgx.ErrNoRows
+	}
+	flag, ok := projectFlags[key]
 	if !ok {
 		return repository.Flag{}, pgx.ErrNoRows
 	}
@@ -559,44 +587,50 @@ func (f *fakeServiceRepository) ListFlags(_ context.Context) ([]repository.Flag,
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	flags := make([]repository.Flag, 0, len(f.flags))
-	for _, flag := range f.flags {
-		flags = append(flags, flag)
+	var flags []repository.Flag
+	for _, projectFlags := range f.flags {
+		for _, flag := range projectFlags {
+			flags = append(flags, flag)
+		}
 	}
 	return flags, nil
 }
 
-func (f *fakeServiceRepository) DeleteFlag(_ context.Context, key string) error {
+func (f *fakeServiceRepository) DeleteFlag(_ context.Context, projectID, key string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if _, ok := f.flags[key]; !ok {
+	projectFlags, ok := f.flags[projectID]
+	if !ok {
 		return pgx.ErrNoRows
 	}
-	delete(f.flags, key)
+	if _, ok := projectFlags[key]; !ok {
+		return pgx.ErrNoRows
+	}
+	delete(f.flags[projectID], key)
 	return nil
 }
 
-func (f *fakeServiceRepository) ListEventsSince(_ context.Context, eventID int64) ([]repository.FlagEvent, error) {
+func (f *fakeServiceRepository) ListEventsSince(_ context.Context, projectID string, eventID int64) ([]repository.FlagEvent, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
 	events := make([]repository.FlagEvent, 0, len(f.events))
 	for _, event := range f.events {
-		if event.EventID > eventID {
+		if event.EventID > eventID && event.ProjectID == projectID {
 			events = append(events, event)
 		}
 	}
 	return events, nil
 }
 
-func (f *fakeServiceRepository) ListEventsSinceForKey(_ context.Context, eventID int64, key string) ([]repository.FlagEvent, error) {
+func (f *fakeServiceRepository) ListEventsSinceForKey(_ context.Context, projectID string, eventID int64, key string) ([]repository.FlagEvent, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
 	events := make([]repository.FlagEvent, 0, len(f.events))
 	for _, event := range f.events {
-		if event.EventID > eventID && event.FlagKey == key {
+		if event.EventID > eventID && event.ProjectID == projectID && event.FlagKey == key {
 			events = append(events, event)
 		}
 	}
@@ -626,14 +660,20 @@ func (f *fakeServiceRepository) PublishFlagEvent(ctx context.Context, event repo
 
 func (f *fakeServiceRepository) setFlag(flag repository.Flag) {
 	f.mu.Lock()
-	f.flags[flag.Key] = flag
-	f.mu.Unlock()
+	defer f.mu.Unlock()
+	if _, ok := f.flags[flag.ProjectID]; !ok {
+		f.flags[flag.ProjectID] = make(map[string]repository.Flag)
+	}
+	f.flags[flag.ProjectID][flag.Key] = flag
 }
 
 func (f *fakeServiceRepository) removeFlag(key string) {
 	f.mu.Lock()
-	delete(f.flags, key)
-	f.mu.Unlock()
+	defer f.mu.Unlock()
+	// remove from all projects for simplicity in tests or just default
+	for pid := range f.flags {
+		delete(f.flags[pid], key)
+	}
 }
 
 type notifyingFakeServiceRepository struct {

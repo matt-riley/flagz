@@ -19,18 +19,20 @@ var (
 
 // TokenValidator validates a bearer token.
 type TokenValidator interface {
-	ValidateToken(ctx context.Context, token string) error
+	ValidateToken(ctx context.Context, token string) (string, error)
 }
 
 // HTTPBearerAuthMiddleware enforces bearer-token auth for HTTP handlers.
 func HTTPBearerAuthMiddleware(validator TokenValidator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if err := authorizeHTTP(r.Context(), r.Header.Get("Authorization"), validator); err != nil {
+			projectID, err := authorizeHTTP(r.Context(), r.Header.Get("Authorization"), validator)
+			if err != nil {
 				writeHTTPUnauthorized(w)
 				return
 			}
-			next.ServeHTTP(w, r)
+			ctx := context.WithValue(r.Context(), projectIDKey, projectID)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
@@ -38,51 +40,85 @@ func HTTPBearerAuthMiddleware(validator TokenValidator) func(http.Handler) http.
 // UnaryBearerAuthInterceptor enforces bearer-token auth for unary gRPC requests.
 func UnaryBearerAuthInterceptor(validator TokenValidator) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		if err := authorizeGRPC(ctx, validator); err != nil {
+		projectID, err := authorizeGRPC(ctx, validator)
+		if err != nil {
 			return nil, status.Error(codes.Unauthenticated, "unauthorized")
 		}
-		return handler(ctx, req)
+		newCtx := context.WithValue(ctx, projectIDKey, projectID)
+		return handler(newCtx, req)
 	}
 }
 
 // StreamBearerAuthInterceptor enforces bearer-token auth for streaming gRPC requests.
 func StreamBearerAuthInterceptor(validator TokenValidator) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		if err := authorizeGRPC(ss.Context(), validator); err != nil {
+		projectID, err := authorizeGRPC(ss.Context(), validator)
+		if err != nil {
 			return status.Error(codes.Unauthenticated, "unauthorized")
 		}
-		return handler(srv, ss)
+		
+		// Wrap the stream to inject context with project ID
+		wrappedStream := &wrappedServerStream{
+			ServerStream: ss,
+			ctx:          context.WithValue(ss.Context(), projectIDKey, projectID),
+		}
+		
+		return handler(srv, wrappedStream)
 	}
 }
 
-func authorizeHTTP(ctx context.Context, authorizationHeader string, validator TokenValidator) error {
+type wrappedServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (w *wrappedServerStream) Context() context.Context {
+	return w.ctx
+}
+
+type contextKey string
+
+const projectIDKey contextKey = "project_id"
+
+// ProjectIDFromContext retrieves the project ID from the context.
+func ProjectIDFromContext(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(projectIDKey).(string)
+	return id, ok
+}
+
+// NewContextWithProjectID returns a new context with the given project ID.
+func NewContextWithProjectID(ctx context.Context, projectID string) context.Context {
+	return context.WithValue(ctx, projectIDKey, projectID)
+}
+
+func authorizeHTTP(ctx context.Context, authorizationHeader string, validator TokenValidator) (string, error) {
 	if validator == nil {
-		return errors.New("token validator is nil")
+		return "", errors.New("token validator is nil")
 	}
 	if strings.TrimSpace(authorizationHeader) == "" {
-		return errMissingAuthorizationHeader
+		return "", errMissingAuthorizationHeader
 	}
 
 	token, err := parseBearerToken(authorizationHeader)
 	if err != nil {
-		return err
+		return "", err
 	}
 	return validator.ValidateToken(ctx, token)
 }
 
-func authorizeGRPC(ctx context.Context, validator TokenValidator) error {
+func authorizeGRPC(ctx context.Context, validator TokenValidator) (string, error) {
 	if validator == nil {
-		return errors.New("token validator is nil")
+		return "", errors.New("token validator is nil")
 	}
 
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return errMissingAuthorizationHeader
+		return "", errMissingAuthorizationHeader
 	}
 
 	authorizationHeaders := md.Get("authorization")
 	if len(authorizationHeaders) == 0 {
-		return errMissingAuthorizationHeader
+		return "", errMissingAuthorizationHeader
 	}
 
 	for _, authorizationHeader := range authorizationHeaders {
@@ -90,10 +126,13 @@ func authorizeGRPC(ctx context.Context, validator TokenValidator) error {
 		if err != nil {
 			continue
 		}
-		return validator.ValidateToken(ctx, token)
+		projectID, err := validator.ValidateToken(ctx, token)
+		if err == nil {
+			return projectID, nil
+		}
 	}
 
-	return errInvalidAuthorizationHeader
+	return "", errInvalidAuthorizationHeader
 }
 
 func parseBearerToken(authorizationHeader string) (string, error) {

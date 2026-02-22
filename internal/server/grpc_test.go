@@ -3,12 +3,12 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"testing"
 	"time"
 
 	flagspb "github.com/matt-riley/flagz/api/proto/v1"
+	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 	"github.com/matt-riley/flagz/internal/service"
 	"google.golang.org/grpc/codes"
@@ -16,11 +16,15 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+func ctxWithProject() context.Context {
+	return middleware.NewContextWithProjectID(context.Background(), "default")
+}
+
 func TestGRPCServerCreateFlag(t *testing.T) {
 	t.Run("missing flag", func(t *testing.T) {
 		grpcServer := NewGRPCServer(&fakeService{})
 
-		_, err := grpcServer.CreateFlag(context.Background(), nil)
+		_, err := grpcServer.CreateFlag(ctxWithProject(), nil)
 		if status.Code(err) != codes.InvalidArgument {
 			t.Fatalf("CreateFlag() code = %v, want %v", status.Code(err), codes.InvalidArgument)
 		}
@@ -35,7 +39,7 @@ func TestGRPCServerCreateFlag(t *testing.T) {
 		}
 		grpcServer := NewGRPCServer(svc)
 
-		_, err := grpcServer.CreateFlag(context.Background(), &flagspb.CreateFlagRequest{
+		_, err := grpcServer.CreateFlag(ctxWithProject(), &flagspb.CreateFlagRequest{
 			Flag: &flagspb.Flag{},
 		})
 		if status.Code(err) != codes.InvalidArgument {
@@ -46,12 +50,12 @@ func TestGRPCServerCreateFlag(t *testing.T) {
 	t.Run("maps validation errors to invalid argument", func(t *testing.T) {
 		svc := &fakeService{
 			createFlagFunc: func(_ context.Context, _ repository.Flag) (repository.Flag, error) {
-				return repository.Flag{}, errors.New("flag key is required")
+				return repository.Flag{}, service.ErrFlagKeyRequired
 			},
 		}
 		grpcServer := NewGRPCServer(svc)
 
-		_, err := grpcServer.CreateFlag(context.Background(), &flagspb.CreateFlagRequest{
+		_, err := grpcServer.CreateFlag(ctxWithProject(), &flagspb.CreateFlagRequest{
 			Flag: &flagspb.Flag{Key: "new-ui"},
 		})
 		if status.Code(err) != codes.InvalidArgument {
@@ -67,7 +71,7 @@ func TestGRPCServerCreateFlag(t *testing.T) {
 		}
 		grpcServer := NewGRPCServer(svc)
 
-		_, err := grpcServer.CreateFlag(context.Background(), &flagspb.CreateFlagRequest{
+		_, err := grpcServer.CreateFlag(ctxWithProject(), &flagspb.CreateFlagRequest{
 			Flag: &flagspb.Flag{Key: "new-ui"},
 		})
 		if status.Code(err) != codes.InvalidArgument {
@@ -83,7 +87,7 @@ func TestGRPCServerCreateFlag(t *testing.T) {
 		}
 		grpcServer := NewGRPCServer(svc)
 
-		_, err := grpcServer.CreateFlag(context.Background(), &flagspb.CreateFlagRequest{
+		_, err := grpcServer.CreateFlag(ctxWithProject(), &flagspb.CreateFlagRequest{
 			Flag: &flagspb.Flag{Key: "new-ui"},
 		})
 		if status.Code(err) != codes.InvalidArgument {
@@ -97,6 +101,7 @@ func TestGRPCServerCreateFlag(t *testing.T) {
 				if flag.Key != "new-ui" {
 					t.Fatalf("CreateFlag key = %q, want %q", flag.Key, "new-ui")
 				}
+				// Check ProjectID if needed, but not set in this test case unless updated
 				if !flag.Enabled {
 					t.Fatal("CreateFlag enabled = false, want true")
 				}
@@ -105,7 +110,7 @@ func TestGRPCServerCreateFlag(t *testing.T) {
 		}
 		grpcServer := NewGRPCServer(svc)
 
-		resp, err := grpcServer.CreateFlag(context.Background(), &flagspb.CreateFlagRequest{
+		resp, err := grpcServer.CreateFlag(ctxWithProject(), &flagspb.CreateFlagRequest{
 			Flag: &flagspb.Flag{
 				Key:          "new-ui",
 				Description:  "new ui rollout",
@@ -127,7 +132,7 @@ func TestGRPCServerUpdateFlag(t *testing.T) {
 	t.Run("missing flag", func(t *testing.T) {
 		grpcServer := NewGRPCServer(&fakeService{})
 
-		_, err := grpcServer.UpdateFlag(context.Background(), nil)
+		_, err := grpcServer.UpdateFlag(ctxWithProject(), nil)
 		if status.Code(err) != codes.InvalidArgument {
 			t.Fatalf("UpdateFlag() code = %v, want %v", status.Code(err), codes.InvalidArgument)
 		}
@@ -142,7 +147,7 @@ func TestGRPCServerUpdateFlag(t *testing.T) {
 		}
 		grpcServer := NewGRPCServer(svc)
 
-		_, err := grpcServer.UpdateFlag(context.Background(), &flagspb.UpdateFlagRequest{
+		_, err := grpcServer.UpdateFlag(ctxWithProject(), &flagspb.UpdateFlagRequest{
 			Flag: &flagspb.Flag{},
 		})
 		if status.Code(err) != codes.InvalidArgument {
@@ -161,7 +166,7 @@ func TestGRPCServerUpdateFlag(t *testing.T) {
 		}
 		grpcServer := NewGRPCServer(svc)
 
-		resp, err := grpcServer.UpdateFlag(context.Background(), &flagspb.UpdateFlagRequest{
+		resp, err := grpcServer.UpdateFlag(ctxWithProject(), &flagspb.UpdateFlagRequest{
 			Flag: &flagspb.Flag{
 				Key:         "new-ui",
 				Description: "updated",
@@ -179,7 +184,7 @@ func TestGRPCServerUpdateFlag(t *testing.T) {
 
 func TestGRPCServerListFlagsPagination(t *testing.T) {
 	svc := &fakeService{
-		listFlagsFunc: func(_ context.Context) ([]repository.Flag, error) {
+		listFlagsFunc: func(_ context.Context, _ string) ([]repository.Flag, error) {
 			return []repository.Flag{
 				{Key: "a"},
 				{Key: "b"},
@@ -190,7 +195,7 @@ func TestGRPCServerListFlagsPagination(t *testing.T) {
 	grpcServer := NewGRPCServer(svc)
 
 	t.Run("returns all flags when page size is not set", func(t *testing.T) {
-		resp, err := grpcServer.ListFlags(context.Background(), &flagspb.ListFlagsRequest{})
+		resp, err := grpcServer.ListFlags(ctxWithProject(), &flagspb.ListFlagsRequest{})
 		if err != nil {
 			t.Fatalf("ListFlags() error = %v", err)
 		}
@@ -203,7 +208,7 @@ func TestGRPCServerListFlagsPagination(t *testing.T) {
 	})
 
 	t.Run("returns paginated results with next page token", func(t *testing.T) {
-		resp, err := grpcServer.ListFlags(context.Background(), &flagspb.ListFlagsRequest{
+		resp, err := grpcServer.ListFlags(ctxWithProject(), &flagspb.ListFlagsRequest{
 			PageSize: 2,
 		})
 		if err != nil {
@@ -221,7 +226,7 @@ func TestGRPCServerListFlagsPagination(t *testing.T) {
 	})
 
 	t.Run("uses page token to return next page", func(t *testing.T) {
-		resp, err := grpcServer.ListFlags(context.Background(), &flagspb.ListFlagsRequest{
+		resp, err := grpcServer.ListFlags(ctxWithProject(), &flagspb.ListFlagsRequest{
 			PageSize:  2,
 			PageToken: "2",
 		})
@@ -240,7 +245,7 @@ func TestGRPCServerListFlagsPagination(t *testing.T) {
 	})
 
 	t.Run("rejects invalid page token", func(t *testing.T) {
-		_, err := grpcServer.ListFlags(context.Background(), &flagspb.ListFlagsRequest{
+		_, err := grpcServer.ListFlags(ctxWithProject(), &flagspb.ListFlagsRequest{
 			PageSize:  1,
 			PageToken: "bad",
 		})
@@ -250,7 +255,7 @@ func TestGRPCServerListFlagsPagination(t *testing.T) {
 	})
 
 	t.Run("rejects negative page size", func(t *testing.T) {
-		_, err := grpcServer.ListFlags(context.Background(), &flagspb.ListFlagsRequest{
+		_, err := grpcServer.ListFlags(ctxWithProject(), &flagspb.ListFlagsRequest{
 			PageSize: -1,
 		})
 		if status.Code(err) != codes.InvalidArgument {
@@ -262,14 +267,14 @@ func TestGRPCServerListFlagsPagination(t *testing.T) {
 func TestGRPCServerWatchFlagStartsFromLastEventID(t *testing.T) {
 	sinceCalls := make([]int64, 0)
 	keyCalls := make([]string, 0)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctxWithProject())
 	stream := &fakeWatchFlagServer{
 		ctx:    ctx,
 		cancel: cancel,
 	}
 
 	svc := &fakeService{
-		listEventsSinceForKeyFunc: func(_ context.Context, eventID int64, key string) ([]repository.FlagEvent, error) {
+		listEventsSinceForKeyFunc: func(_ context.Context, _ string, eventID int64, key string) ([]repository.FlagEvent, error) {
 			sinceCalls = append(sinceCalls, eventID)
 			keyCalls = append(keyCalls, key)
 			if eventID != 5 {
@@ -313,11 +318,11 @@ func TestGRPCServerWatchFlagStartsFromLastEventID(t *testing.T) {
 
 func TestGRPCServerWatchFlagRejectsNegativeLastEventID(t *testing.T) {
 	svc := &fakeService{
-		listEventsSinceFunc: func(_ context.Context, _ int64) ([]repository.FlagEvent, error) {
+		listEventsSinceFunc: func(_ context.Context, _ string, _ int64) ([]repository.FlagEvent, error) {
 			t.Fatal("ListEventsSince should not be called")
 			return nil, nil
 		},
-		listEventsSinceForKeyFunc: func(_ context.Context, _ int64, _ string) ([]repository.FlagEvent, error) {
+		listEventsSinceForKeyFunc: func(_ context.Context, _ string, _ int64, _ string) ([]repository.FlagEvent, error) {
 			t.Fatal("ListEventsSinceForKey should not be called")
 			return nil, nil
 		},
@@ -325,7 +330,7 @@ func TestGRPCServerWatchFlagRejectsNegativeLastEventID(t *testing.T) {
 	grpcServer := NewGRPCServerWithStreamPollInterval(svc, time.Hour)
 
 	err := grpcServer.WatchFlag(&flagspb.WatchFlagRequest{LastEventId: -1}, &fakeWatchFlagServer{
-		ctx: context.Background(),
+		ctx: ctxWithProject(),
 	})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("WatchFlag() code = %v, want %v", status.Code(err), codes.InvalidArgument)
@@ -335,14 +340,14 @@ func TestGRPCServerWatchFlagRejectsNegativeLastEventID(t *testing.T) {
 func TestGRPCServerWatchFlagWithoutKeyUsesUnfilteredEvents(t *testing.T) {
 	sinceCalls := make([]int64, 0)
 	keyedCalls := 0
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctxWithProject())
 	stream := &fakeWatchFlagServer{
 		ctx:    ctx,
 		cancel: cancel,
 	}
 
 	svc := &fakeService{
-		listEventsSinceFunc: func(_ context.Context, eventID int64) ([]repository.FlagEvent, error) {
+		listEventsSinceFunc: func(_ context.Context, _ string, eventID int64) ([]repository.FlagEvent, error) {
 			sinceCalls = append(sinceCalls, eventID)
 			if eventID != 3 {
 				return nil, nil
@@ -356,7 +361,7 @@ func TestGRPCServerWatchFlagWithoutKeyUsesUnfilteredEvents(t *testing.T) {
 				},
 			}, nil
 		},
-		listEventsSinceForKeyFunc: func(_ context.Context, _ int64, _ string) ([]repository.FlagEvent, error) {
+		listEventsSinceForKeyFunc: func(_ context.Context, _ string, _ int64, _ string) ([]repository.FlagEvent, error) {
 			keyedCalls++
 			return nil, nil
 		},
