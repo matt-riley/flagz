@@ -92,9 +92,15 @@ type Service struct {
 type Option func(*Service)
 
 // WithLogger sets the structured logger used by [Service]. When omitted,
-// [slog.Default] is used.
+// [slog.Default] is used. Passing nil is a no-op and leaves the existing
+// logger unchanged.
 func WithLogger(log *slog.Logger) Option {
-	return func(s *Service) { s.log = log }
+	return func(s *Service) {
+		if log == nil {
+			return
+		}
+		s.log = log
+	}
 }
 
 // New creates a [Service], eagerly loading the flag cache from the repository.

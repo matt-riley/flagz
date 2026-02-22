@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/matt-riley/flagz/internal/repository"
 	"github.com/matt-riley/flagz/internal/service"
 )
@@ -183,7 +185,8 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if _, err := h.Repo.CreateAdminUser(r.Context(), username, hash); err != nil {
-			if strings.Contains(err.Error(), "duplicate key") {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 				http.Redirect(w, r, "/login", http.StatusFound)
 				return
 			}
@@ -226,17 +229,18 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
 
-		remoteAddr := r.Header.Get("X-Real-IP")
-		if remoteAddr == "" {
-			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-				remoteAddr, _, _ = strings.Cut(xff, ",")
-				remoteAddr = strings.TrimSpace(remoteAddr)
-			}
+		// Only trust proxy headers when the request comes from a
+		// loopback or private address (i.e., a trusted reverse proxy).
+		remoteAddr := r.RemoteAddr
+		if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+			remoteAddr = host
 		}
-		if remoteAddr == "" {
-			remoteAddr = r.RemoteAddr
-			if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
-				remoteAddr = host
+		if ip := net.ParseIP(remoteAddr); ip != nil && (ip.IsLoopback() || ip.IsPrivate()) {
+			if xri := r.Header.Get("X-Real-IP"); xri != "" {
+				remoteAddr = xri
+			} else if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+				first, _, _ := strings.Cut(xff, ",")
+				remoteAddr = strings.TrimSpace(first)
 			}
 		}
 		
