@@ -94,18 +94,22 @@ type FlagEvent struct {
 	CreatedAt time.Time       `json:"created_at"`
 }
 
-
 // AuditLogEntry records a mutation performed on a flag for audit purposes.
+//
+// Note: The audit_log table is created by migration 0004_audit_log in the
+// phase-4.3/audit-logging branch. This code is included here for interface
+// completeness and will function once that migration is applied.
 type AuditLogEntry struct {
-ID          int64           `json:"id"`
-ProjectID   string          `json:"project_id"`
-APIKeyID    string          `json:"api_key_id,omitempty"`
-AdminUserID string          `json:"admin_user_id,omitempty"`
-Action      string          `json:"action"`
-FlagKey     string          `json:"flag_key"`
-Details     json.RawMessage `json:"details,omitempty"`
-CreatedAt   time.Time       `json:"created_at"`
+	ID          int64           `json:"id"`
+	ProjectID   string          `json:"project_id"`
+	APIKeyID    string          `json:"api_key_id,omitempty"`
+	AdminUserID string          `json:"admin_user_id,omitempty"`
+	Action      string          `json:"action"`
+	FlagKey     string          `json:"flag_key"`
+	Details     json.RawMessage `json:"details,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
 }
+
 // PostgresRepository implements flag, API key, and event persistence backed by
 // a pgxpool connection pool. It also supports LISTEN/NOTIFY for real-time
 // cache invalidation.
@@ -726,41 +730,41 @@ func ensureJSON(input json.RawMessage, fallback string) json.RawMessage {
 
 // InsertAuditLog writes a single audit log entry and returns the generated ID.
 func (r *PostgresRepository) InsertAuditLog(ctx context.Context, entry AuditLogEntry) error {
-_, err := r.pool.Exec(ctx,
-`INSERT INTO audit_log (project_id, api_key_id, admin_user_id, action, flag_key, details)
+	_, err := r.pool.Exec(ctx,
+		`INSERT INTO audit_log (project_id, api_key_id, admin_user_id, action, flag_key, details)
  VALUES ($1, $2, $3, $4, $5, $6)`,
-entry.ProjectID, entry.APIKeyID, entry.AdminUserID, entry.Action, entry.FlagKey, entry.Details,
-)
-return err
+		entry.ProjectID, entry.APIKeyID, entry.AdminUserID, entry.Action, entry.FlagKey, entry.Details,
+	)
+	return err
 }
 
 // ListAuditLog returns audit log entries for a project, newest first.
 func (r *PostgresRepository) ListAuditLog(ctx context.Context, projectID string, limit, offset int) ([]AuditLogEntry, error) {
-rows, err := r.pool.Query(ctx,
-`SELECT id, project_id, api_key_id, admin_user_id, action, flag_key, details, created_at
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, project_id, api_key_id, admin_user_id, action, flag_key, details, created_at
  FROM audit_log
  WHERE project_id = $1
  ORDER BY id DESC
  LIMIT $2 OFFSET $3`,
-projectID, limit, offset,
-)
-if err != nil {
-return nil, fmt.Errorf("listing audit log: %w", err)
-}
-defer rows.Close()
+		projectID, limit, offset,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing audit log: %w", err)
+	}
+	defer rows.Close()
 
-var entries []AuditLogEntry
-for rows.Next() {
-var e AuditLogEntry
-if err := rows.Scan(&e.ID, &e.ProjectID, &e.APIKeyID, &e.AdminUserID, &e.Action, &e.FlagKey, &e.Details, &e.CreatedAt); err != nil {
-return nil, fmt.Errorf("scanning audit log entry: %w", err)
-}
-entries = append(entries, e)
-}
-if err := rows.Err(); err != nil {
-return nil, fmt.Errorf("iterating audit log rows: %w", err)
-}
-return entries, nil
+	var entries []AuditLogEntry
+	for rows.Next() {
+		var e AuditLogEntry
+		if err := rows.Scan(&e.ID, &e.ProjectID, &e.APIKeyID, &e.AdminUserID, &e.Action, &e.FlagKey, &e.Details, &e.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning audit log entry: %w", err)
+		}
+		entries = append(entries, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating audit log rows: %w", err)
+	}
+	return entries, nil
 }
 
 func listenStatement(channel string) string {
