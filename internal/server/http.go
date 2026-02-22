@@ -393,7 +393,7 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filterKey := r.URL.Query().Get("key")
+	filterKey := strings.TrimSpace(r.URL.Query().Get("key"))
 
 	rc := http.NewResponseController(w)
 

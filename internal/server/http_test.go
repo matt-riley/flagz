@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -334,6 +335,191 @@ func TestHTTPHandlerStreamSendsSSEErrorAfterStartOnBackendFailure(t *testing.T) 
 	}
 	if !strings.Contains(body, `data: {"error":"internal server error"}`) {
 		t.Fatalf("stream body missing error payload: %q", body)
+	}
+}
+
+func TestHTTPHandlerListFlagsPaginationDefault(t *testing.T) {
+	svc := &fakeService{
+		listFlagsFunc: func(_ context.Context, _ string) ([]repository.Flag, error) {
+			return []repository.Flag{
+				{Key: "alpha"},
+				{Key: "beta"},
+			}, nil
+		},
+	}
+
+	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
+	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/flags", nil))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var got []repository.Flag
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d flags, want 2", len(got))
+	}
+}
+
+func TestHTTPHandlerListFlagsPaginationWithCursor(t *testing.T) {
+	svc := &fakeService{
+		listFlagsFunc: func(_ context.Context, _ string) ([]repository.Flag, error) {
+			return []repository.Flag{
+				{Key: "alpha"},
+				{Key: "beta"},
+				{Key: "gamma"},
+			}, nil
+		},
+	}
+
+	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
+	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/flags?cursor=alpha", nil))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var got paginatedFlagsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(got.Flags) != 2 {
+		t.Fatalf("got %d flags, want 2", len(got.Flags))
+	}
+	if got.Flags[0].Key != "beta" {
+		t.Fatalf("first flag key = %q, want %q", got.Flags[0].Key, "beta")
+	}
+}
+
+func TestHTTPHandlerListFlagsPaginationWithLimit(t *testing.T) {
+	svc := &fakeService{
+		listFlagsFunc: func(_ context.Context, _ string) ([]repository.Flag, error) {
+			return []repository.Flag{
+				{Key: "alpha"},
+				{Key: "beta"},
+				{Key: "gamma"},
+			}, nil
+		},
+	}
+
+	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
+	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/flags?limit=2", nil))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var got paginatedFlagsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(got.Flags) != 2 {
+		t.Fatalf("got %d flags, want 2", len(got.Flags))
+	}
+	if got.NextCursor != "beta" {
+		t.Fatalf("next_cursor = %q, want %q", got.NextCursor, "beta")
+	}
+}
+
+func TestHTTPHandlerListFlagsPaginationMaxLimitClamped(t *testing.T) {
+	flags := make([]repository.Flag, 1002)
+	for i := range flags {
+		flags[i] = repository.Flag{Key: fmt.Sprintf("flag-%04d", i)}
+	}
+	svc := &fakeService{
+		listFlagsFunc: func(_ context.Context, _ string) ([]repository.Flag, error) {
+			return flags, nil
+		},
+	}
+
+	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
+	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/flags?limit=9999", nil))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var got paginatedFlagsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(got.Flags) != 1000 {
+		t.Fatalf("got %d flags, want 1000 (clamped)", len(got.Flags))
+	}
+	if got.NextCursor == "" {
+		t.Fatal("expected next_cursor to be set when more flags remain")
+	}
+}
+
+func TestHTTPHandlerStreamWithKeyFilter(t *testing.T) {
+	var calledKey string
+	svc := &fakeService{
+		listEventsSinceForKeyFunc: func(_ context.Context, _ string, _ int64, key string) ([]repository.FlagEvent, error) {
+			calledKey = key
+			return []repository.FlagEvent{
+				{
+					EventID:   1,
+					FlagKey:   "myFlag",
+					EventType: service.EventTypeUpdated,
+					Payload:   json.RawMessage(`{"key":"myFlag","enabled":true}`),
+				},
+			}, nil
+		},
+	}
+
+	handler := NewHTTPHandlerWithStreamPollInterval(svc, time.Hour)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/stream?key=myFlag", nil).WithContext(ctx))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if calledKey != "myFlag" {
+		t.Fatalf("ListEventsSinceForKey key = %q, want %q", calledKey, "myFlag")
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: update") {
+		t.Fatalf("stream body missing update event: %q", body)
+	}
+}
+
+func TestHTTPHandlerStreamWithoutKeyFilter(t *testing.T) {
+	var calledAll bool
+	svc := &fakeService{
+		listEventsSinceFunc: func(_ context.Context, _ string, _ int64) ([]repository.FlagEvent, error) {
+			calledAll = true
+			return nil, nil
+		},
+	}
+
+	handler := NewHTTPHandlerWithStreamPollInterval(svc, time.Hour)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/stream", nil).WithContext(ctx))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !calledAll {
+		t.Fatal("expected ListEventsSince to be called when no key filter is provided")
 	}
 }
 

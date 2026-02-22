@@ -193,6 +193,20 @@ paths:
     get:
       summary: List all flags
       description: Retrieve all flags from the in-memory cache. Fast as lightning.
+      parameters:
+        - name: cursor
+          in: query
+          description: Flag key to start after (for pagination)
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum number of flags to return
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 1000
       responses:
         '200':
           description: A list of all known flags.
@@ -395,6 +409,11 @@ paths:
         Subscribe to real-time flag changes via Server-Sent Events (SSE).
         Events include `update` and `delete`.
       parameters:
+        - name: key
+          in: query
+          description: Optional flag key to filter events
+          schema:
+            type: string
         - name: Last-Event-ID
           in: header
           schema:
