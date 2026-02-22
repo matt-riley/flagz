@@ -124,6 +124,36 @@ func TestServiceCRUDAndEvaluation(t *testing.T) {
 	}
 }
 
+func TestListFlagsProjectIDValidation(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeServiceRepository()
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	t.Run("empty project ID returns ErrProjectIDRequired", func(t *testing.T) {
+		_, err := svc.ListFlags(ctx, "")
+		if !errors.Is(err, ErrProjectIDRequired) {
+			t.Fatalf("ListFlags() error = %v, want %v", err, ErrProjectIDRequired)
+		}
+	})
+
+	t.Run("whitespace project ID returns ErrProjectIDRequired", func(t *testing.T) {
+		_, err := svc.ListFlags(ctx, "   ")
+		if !errors.Is(err, ErrProjectIDRequired) {
+			t.Fatalf("ListFlags() error = %v, want %v", err, ErrProjectIDRequired)
+		}
+	})
+
+	t.Run("valid project ID succeeds", func(t *testing.T) {
+		_, err := svc.ListFlags(ctx, "proj-1")
+		if err != nil {
+			t.Fatalf("ListFlags() error = %v, want nil", err)
+		}
+	})
+}
+
 func TestServiceMutationSucceedsWhenPublishFails(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeServiceRepository()
