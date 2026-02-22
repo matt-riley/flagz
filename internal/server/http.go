@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -50,6 +51,11 @@ type evaluateJSONBatchItem struct {
 
 type evaluateJSONResponse struct {
 	Results []service.ResolveResult `json:"results"`
+}
+
+type paginatedFlagsResponse struct {
+	Flags      []repository.Flag `json:"flags"`
+	NextCursor string            `json:"next_cursor,omitempty"`
 }
 
 // NewHTTPHandler returns an [http.Handler] wired with all flagz routes and a
@@ -221,6 +227,44 @@ func (s *HTTPServer) handleListFlags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cursor := r.URL.Query().Get("cursor")
+	limit := 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		limit, err = strconv.Atoi(l)
+		if err != nil || limit < 1 {
+			writeJSONError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		if limit > 1000 {
+			limit = 1000
+		}
+	}
+
+	// Apply cursor-based pagination when either parameter is provided.
+	if cursor != "" || limit > 0 {
+		sort.Slice(flags, func(i, j int) bool { return flags[i].Key < flags[j].Key })
+
+		if cursor != "" {
+			idx := sort.Search(len(flags), func(i int) bool { return flags[i].Key > cursor })
+			flags = flags[idx:]
+		}
+
+		if limit == 0 {
+			limit = 100
+		}
+		nextCursor := ""
+		if len(flags) > limit {
+			nextCursor = flags[limit-1].Key
+			flags = flags[:limit]
+		}
+
+		writeJSON(w, http.StatusOK, paginatedFlagsResponse{
+			Flags:      flags,
+			NextCursor: nextCursor,
+		})
+		return
+	}
+
 	writeJSON(w, http.StatusOK, flags)
 }
 
@@ -349,7 +393,18 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	filterKey := r.URL.Query().Get("key")
+
 	rc := http.NewResponseController(w)
+
+	// listEvents selects the appropriate service method based on whether
+	// a per-key filter was requested.
+	listEvents := func(ctx context.Context, eventID int64) ([]repository.FlagEvent, error) {
+		if filterKey != "" {
+			return s.service.ListEventsSinceForKey(ctx, projectID, eventID, filterKey)
+		}
+		return s.service.ListEventsSince(ctx, projectID, eventID)
+	}
 
 	currentEventID := lastEventID
 	writeEvents := func(events []repository.FlagEvent) error {
@@ -374,7 +429,7 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 		return nil
 	}
 
-	initialEvents, err := s.service.ListEventsSince(r.Context(), projectID, currentEventID)
+	initialEvents, err := listEvents(r.Context(), currentEventID)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -402,7 +457,7 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
-			events, err := s.service.ListEventsSince(r.Context(), projectID, currentEventID)
+			events, err := listEvents(r.Context(), currentEventID)
 			if err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return
