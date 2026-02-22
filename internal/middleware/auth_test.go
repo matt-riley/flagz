@@ -274,6 +274,28 @@ func TestUnaryBearerAuthInterceptor(t *testing.T) {
 			t.Fatalf("expected response %q, got %#v", "ok", res)
 		}
 	})
+
+	t.Run("valid token without dot has no key ID", func(t *testing.T) {
+		validator := &testTokenValidator{expectedToken: "nodottoken", projectID: "proj-123"}
+		interceptor := UnaryBearerAuthInterceptor(validator)
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer nodottoken"))
+
+		_, err := interceptor(ctx, struct{}{}, &grpc.UnaryServerInfo{}, func(ctx context.Context, _ any) (any, error) {
+			pid, ok := ProjectIDFromContext(ctx)
+			if !ok || pid != "proj-123" {
+				t.Errorf("ProjectIDFromContext = %q, %v; want proj-123, true", pid, ok)
+			}
+			_, ok = APIKeyIDFromContext(ctx)
+			if ok {
+				t.Error("expected no API key ID in context for token without dot")
+			}
+			return "ok", nil
+		})
+
+		if err != nil {
+			t.Fatalf("expected nil error, got %v", err)
+		}
+	})
 }
 
 func TestStreamBearerAuthInterceptor(t *testing.T) {
@@ -322,6 +344,28 @@ func TestStreamBearerAuthInterceptor(t *testing.T) {
 		}
 		if !handlerCalled {
 			t.Fatal("expected handler to be called")
+		}
+	})
+
+	t.Run("valid token without dot has no key ID", func(t *testing.T) {
+		validator := &testTokenValidator{expectedToken: "nodottoken", projectID: "proj-123"}
+		interceptor := StreamBearerAuthInterceptor(validator)
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer nodottoken"))
+
+		err := interceptor(nil, &testServerStream{ctx: ctx}, &grpc.StreamServerInfo{}, func(_ any, ss grpc.ServerStream) error {
+			pid, ok := ProjectIDFromContext(ss.Context())
+			if !ok || pid != "proj-123" {
+				t.Errorf("ProjectIDFromContext = %q, %v; want proj-123, true", pid, ok)
+			}
+			_, ok = APIKeyIDFromContext(ss.Context())
+			if ok {
+				t.Error("expected no API key ID in context for token without dot")
+			}
+			return nil
+		})
+
+		if err != nil {
+			t.Fatalf("expected nil error, got %v", err)
 		}
 	})
 
