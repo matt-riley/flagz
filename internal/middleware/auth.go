@@ -102,7 +102,7 @@ func StreamBearerAuthInterceptor(validator TokenValidator, opts ...AuthOption) g
 			ctx = context.WithValue(ctx, apiKeyIDKey, keyID)
 		}
 
-		// Wrap the stream to inject context with project ID
+		// Wrap the stream to inject context with project and API key IDs
 		wrappedStream := &wrappedServerStream{
 			ServerStream: ss,
 			ctx:          ctx,
