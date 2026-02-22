@@ -27,6 +27,7 @@ import (
 	"github.com/matt-riley/flagz/internal/admin"
 	"github.com/matt-riley/flagz/internal/config"
 	"github.com/matt-riley/flagz/internal/logging"
+	"github.com/matt-riley/flagz/internal/metrics"
 	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 	"github.com/matt-riley/flagz/internal/server"
@@ -69,14 +70,19 @@ func run() error {
 	defer pool.Close()
 
 	repo := repository.NewPostgresRepository(pool)
-	svc, err := service.New(ctx, repo, service.WithLogger(log))
+	m := metrics.New()
+	svc, err := service.New(ctx, repo,
+		service.WithLogger(log),
+		service.WithCacheMetrics(m.IncCacheLoads, m.IncCacheInvalidations, m.ResetCacheSize, m.SetCacheSize),
+	)
 	if err != nil {
 		return fmt.Errorf("init service: %w", err)
 	}
 
+	authFailure := middleware.WithOnAuthFailure(func() { m.AuthFailuresTotal.Inc() })
 	tokenValidator := &apiKeyTokenValidator{lookup: repo}
-	apiHandler := server.NewHTTPHandlerWithStreamPollInterval(svc, cfg.StreamPollInterval)
-	httpHandler := newHTTPHandler(apiHandler, tokenValidator)
+	apiHandler := server.NewHTTPHandlerWithOptions(svc, cfg.StreamPollInterval, m)
+	httpHandler := newHTTPHandler(apiHandler, tokenValidator, authFailure)
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -87,10 +93,35 @@ func run() error {
 	}
 
 	grpcServer := grpc.NewServer(
-		grpc.UnaryInterceptor(middleware.UnaryBearerAuthInterceptor(tokenValidator)),
-		grpc.StreamInterceptor(middleware.StreamBearerAuthInterceptor(tokenValidator)),
+		grpc.ChainUnaryInterceptor(
+			middleware.UnaryBearerAuthInterceptor(tokenValidator, authFailure),
+			m.UnaryServerInterceptor(),
+		),
+		grpc.ChainStreamInterceptor(
+			middleware.StreamBearerAuthInterceptor(tokenValidator, authFailure),
+			m.StreamServerInterceptor(),
+		),
 	)
-	flagspb.RegisterFlagServiceServer(grpcServer, server.NewGRPCServerWithStreamPollInterval(svc, cfg.StreamPollInterval))
+	flagspb.RegisterFlagServiceServer(grpcServer, server.NewGRPCServerWithOptions(svc, cfg.StreamPollInterval, m))
+
+	// Periodically update DB pool metrics.
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				stat := pool.Stat()
+				m.SetDBPoolStats(metrics.DBPoolStats{
+					Acquired: float64(stat.AcquiredConns()),
+					Idle:     float64(stat.IdleConns()),
+					Total:    float64(stat.TotalConns()),
+				})
+			}
+		}
+	}()
 
 	// -------------------------------------------------------------------------
 	// Admin Portal (Tailscale)
@@ -207,8 +238,8 @@ func run() error {
 	return serveErr
 }
 
-func newHTTPHandler(apiHandler http.Handler, tokenValidator middleware.TokenValidator) http.Handler {
-	protectedAPIHandler := middleware.HTTPBearerAuthMiddleware(tokenValidator)(apiHandler)
+func newHTTPHandler(apiHandler http.Handler, tokenValidator middleware.TokenValidator, opts ...middleware.AuthOption) http.Handler {
+	protectedAPIHandler := middleware.HTTPBearerAuthMiddleware(tokenValidator, opts...)(apiHandler)
 
 	mux := http.NewServeMux()
 	mux.Handle("/v1/", protectedAPIHandler)

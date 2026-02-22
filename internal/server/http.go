@@ -10,10 +10,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/matt-riley/flagz/internal/core"
+	"github.com/matt-riley/flagz/internal/metrics"
 	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 	"github.com/matt-riley/flagz/internal/service"
@@ -30,8 +30,9 @@ var errJSONBodyTooLarge = errors.New("json request body too large")
 // evaluation, SSE streaming, health checks, and metrics.
 type HTTPServer struct {
 	service            Service
+	metrics            *metrics.Metrics
+	metricsHandler     http.Handler
 	streamPollInterval time.Duration
-	requestsTotal      atomic.Uint64
 }
 
 type evaluateJSONRequest struct {
@@ -54,12 +55,22 @@ type evaluateJSONResponse struct {
 // NewHTTPHandler returns an [http.Handler] wired with all flagz routes and a
 // default stream poll interval of 1 second.
 func NewHTTPHandler(svc Service) http.Handler {
-	return NewHTTPHandlerWithStreamPollInterval(svc, defaultStreamPollInterval)
+	return NewHTTPHandlerWithOptions(svc, defaultStreamPollInterval, nil)
 }
 
 // NewHTTPHandlerWithStreamPollInterval returns an [http.Handler] wired with all
 // flagz routes using the specified stream poll interval for SSE.
+//
+// Note: This constructor creates a private [metrics.Metrics] instance. To share
+// a single registry across HTTP and gRPC servers, use [NewHTTPHandlerWithOptions].
 func NewHTTPHandlerWithStreamPollInterval(svc Service, streamPollInterval time.Duration) http.Handler {
+	return NewHTTPHandlerWithOptions(svc, streamPollInterval, nil)
+}
+
+// NewHTTPHandlerWithOptions returns an [http.Handler] wired with all flagz
+// routes using the specified stream poll interval and metrics. If m is nil, a
+// default [metrics.Metrics] instance is created.
+func NewHTTPHandlerWithOptions(svc Service, streamPollInterval time.Duration, m *metrics.Metrics) http.Handler {
 	if svc == nil {
 		panic("service is nil")
 	}
@@ -68,8 +79,14 @@ func NewHTTPHandlerWithStreamPollInterval(svc Service, streamPollInterval time.D
 		streamPollInterval = defaultStreamPollInterval
 	}
 
+	if m == nil {
+		m = metrics.New()
+	}
+
 	server := &HTTPServer{
 		service:            svc,
+		metrics:            m,
+		metricsHandler:     m.Handler(),
 		streamPollInterval: streamPollInterval,
 	}
 
@@ -89,9 +106,54 @@ func NewHTTPHandlerWithStreamPollInterval(svc Service, streamPollInterval time.D
 
 func (s *HTTPServer) withMetrics(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.requestsTotal.Add(1)
-		next.ServeHTTP(w, r)
+		start := time.Now()
+		rw := &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
+		next.ServeHTTP(rw, r)
+
+		route := routePattern(r)
+		status := strconv.Itoa(rw.statusCode)
+		s.metrics.HTTPRequestsTotal.WithLabelValues(r.Method, route, status).Inc()
+		s.metrics.HTTPRequestDuration.WithLabelValues(r.Method, route, status).Observe(time.Since(start).Seconds())
 	})
+}
+
+// statusRecorder wraps [http.ResponseWriter] to capture the status code.
+type statusRecorder struct {
+	http.ResponseWriter
+	statusCode  int
+	wroteHeader bool
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	if r.wroteHeader {
+		return
+	}
+	r.statusCode = code
+	r.wroteHeader = true
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Write(b []byte) (int, error) {
+	if !r.wroteHeader {
+		r.WriteHeader(http.StatusOK)
+	}
+	return r.ResponseWriter.Write(b)
+}
+
+// Unwrap returns the underlying ResponseWriter so http.ResponseController
+// can detect real interface support (e.g. http.Flusher) instead of relying
+// on the wrapper's own type assertions.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
+// routePattern returns the matched route pattern for metrics labels,
+// falling back to "unknown" if no pattern is available.
+func routePattern(r *http.Request) string {
+	if pat := r.Pattern; pat != "" {
+		return pat
+	}
+	return "unknown"
 }
 
 func (s *HTTPServer) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
@@ -268,6 +330,10 @@ func (s *HTTPServer) handleEvaluate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	for _, result := range results {
+		s.metrics.RecordEvaluation(result.Value)
+	}
+
 	writeJSON(w, http.StatusOK, evaluateJSONResponse{Results: results})
 }
 
@@ -283,11 +349,7 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeJSONError(w, http.StatusInternalServerError, "streaming unsupported")
-		return
-	}
+	rc := http.NewResponseController(w)
 
 	currentEventID := lastEventID
 	writeEvents := func(events []repository.FlagEvent) error {
@@ -306,7 +368,7 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 			if err := writeSSEEvent(w, event.EventID, eventName, payload); err != nil {
 				return err
 			}
-			flusher.Flush()
+			_ = rc.Flush()
 		}
 
 		return nil
@@ -323,7 +385,10 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 	headers.Set("Cache-Control", "no-cache")
 	headers.Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
+	_ = rc.Flush()
+
+	s.metrics.ActiveStreams.WithLabelValues("sse").Inc()
+	defer s.metrics.ActiveStreams.WithLabelValues("sse").Dec()
 
 	if err := writeEvents(initialEvents); err != nil {
 		return
@@ -342,7 +407,7 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return
 				}
-				writeSSEError(w, flusher, serviceErrorMessage(err))
+				writeSSEError(w, rc, serviceErrorMessage(err))
 				return
 			}
 			if err := writeEvents(events); err != nil {
@@ -356,11 +421,8 @@ func (s *HTTPServer) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *HTTPServer) handleMetrics(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	_, _ = fmt.Fprintf(w, "# HELP flagz_http_requests_total Total number of HTTP requests.\n")
-	_, _ = fmt.Fprintf(w, "# TYPE flagz_http_requests_total counter\n")
-	_, _ = fmt.Fprintf(w, "flagz_http_requests_total %d\n", s.requestsTotal.Load())
+func (s *HTTPServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	s.metricsHandler.ServeHTTP(w, r)
 }
 
 func parseLastEventID(value string) (int64, error) {
@@ -422,13 +484,13 @@ func serviceErrorMessage(err error) string {
 	}
 }
 
-func writeSSEError(w http.ResponseWriter, flusher http.Flusher, message string) {
+func writeSSEError(w http.ResponseWriter, rc *http.ResponseController, message string) {
 	payload, err := json.Marshal(map[string]string{"error": message})
 	if err != nil {
 		payload = []byte(`{"error":"internal server error"}`)
 	}
 	_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", payload)
-	flusher.Flush()
+	_ = rc.Flush()
 }
 
 func writeSSEEvent(w io.Writer, eventID int64, eventName string, payload []byte) error {

@@ -785,6 +785,187 @@ func (f *resubscribingFakeServiceRepository) subscriptionCalls() int {
 	return f.subscriptions
 }
 
+func TestWithCacheMetrics_LoadCache(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeServiceRepository()
+	repo.setFlag(repository.Flag{ProjectID: "proj-a", Key: "flag-1", Enabled: true, Variants: json.RawMessage(`{}`), Rules: json.RawMessage(`[]`)})
+	repo.setFlag(repository.Flag{ProjectID: "proj-a", Key: "flag-2", Enabled: true, Variants: json.RawMessage(`{}`), Rules: json.RawMessage(`[]`)})
+	repo.setFlag(repository.Flag{ProjectID: "proj-b", Key: "flag-3", Enabled: true, Variants: json.RawMessage(`{}`), Rules: json.RawMessage(`[]`)})
+
+	var mu sync.Mutex
+	var seq int
+	var loadSeq, resetSeq int
+	type updateCall struct {
+		seq       int
+		projectID string
+		size      float64
+	}
+	var updates []updateCall
+
+	onLoad := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		seq++
+		loadSeq = seq
+	}
+	onInvalidation := func() {}
+	onCacheReset := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		seq++
+		resetSeq = seq
+	}
+	onCacheUpdate := func(projectID string, size float64) {
+		mu.Lock()
+		defer mu.Unlock()
+		seq++
+		updates = append(updates, updateCall{seq: seq, projectID: projectID, size: size})
+	}
+
+	_, err := New(ctx, repo, WithCacheMetrics(onLoad, onInvalidation, onCacheReset, onCacheUpdate))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if loadSeq == 0 {
+		t.Fatal("onCacheLoad was not called")
+	}
+	if resetSeq == 0 {
+		t.Fatal("onCacheReset was not called")
+	}
+	if len(updates) != 2 {
+		t.Fatalf("onCacheUpdate calls = %d, want 2", len(updates))
+	}
+
+	// Verify onCacheLoad was called before onCacheReset.
+	if loadSeq >= resetSeq {
+		t.Fatalf("onCacheLoad (seq=%d) not called before onCacheReset (seq=%d)", loadSeq, resetSeq)
+	}
+
+	// Verify onCacheReset was called before any onCacheUpdate.
+	for _, u := range updates {
+		if u.seq <= resetSeq {
+			t.Fatalf("onCacheUpdate (seq=%d) called before onCacheReset (seq=%d)", u.seq, resetSeq)
+		}
+	}
+
+	// Verify correct project IDs and sizes.
+	got := make(map[string]float64)
+	for _, u := range updates {
+		got[u.projectID] = u.size
+	}
+	if got["proj-a"] != 2 {
+		t.Fatalf("onCacheUpdate(proj-a) size = %v, want 2", got["proj-a"])
+	}
+	if got["proj-b"] != 1 {
+		t.Fatalf("onCacheUpdate(proj-b) size = %v, want 1", got["proj-b"])
+	}
+}
+
+func TestWithCacheMetrics_NilCallbacks(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeServiceRepository()
+	repo.setFlag(repository.Flag{ProjectID: "default", Key: "flag-1", Enabled: true, Variants: json.RawMessage(`{}`), Rules: json.RawMessage(`[]`)})
+
+	// No WithCacheMetrics option — all callbacks are nil.
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v, want nil (nil callbacks should not panic)", err)
+	}
+
+	// Explicit second LoadCache to confirm nil callbacks remain safe.
+	if err := svc.LoadCache(ctx); err != nil {
+		t.Fatalf("LoadCache() error = %v", err)
+	}
+}
+
+func TestWithCacheMetrics_ResetBeforeUpdate(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeServiceRepository()
+	repo.setFlag(repository.Flag{ProjectID: "p1", Key: "a", Enabled: true, Variants: json.RawMessage(`{}`), Rules: json.RawMessage(`[]`)})
+	repo.setFlag(repository.Flag{ProjectID: "p2", Key: "b", Enabled: true, Variants: json.RawMessage(`{}`), Rules: json.RawMessage(`[]`)})
+	repo.setFlag(repository.Flag{ProjectID: "p2", Key: "c", Enabled: true, Variants: json.RawMessage(`{}`), Rules: json.RawMessage(`[]`)})
+
+	var mu sync.Mutex
+	var order []string
+
+	onLoad := func() {}
+	onInvalidation := func() {}
+	onCacheReset := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		order = append(order, "reset")
+	}
+	onCacheUpdate := func(projectID string, size float64) {
+		mu.Lock()
+		defer mu.Unlock()
+		order = append(order, "update:"+projectID)
+	}
+
+	svc, err := New(ctx, repo, WithCacheMetrics(onLoad, onInvalidation, onCacheReset, onCacheUpdate))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	// Clear and reload to observe ordering a second time.
+	mu.Lock()
+	order = nil
+	mu.Unlock()
+
+	if err := svc.LoadCache(ctx); err != nil {
+		t.Fatalf("LoadCache() error = %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(order) < 3 {
+		t.Fatalf("callback invocations = %d, want >= 3 (1 reset + 2 updates)", len(order))
+	}
+	if order[0] != "reset" {
+		t.Fatalf("first callback = %q, want %q", order[0], "reset")
+	}
+	for i := 1; i < len(order); i++ {
+		if order[i] == "reset" {
+			t.Fatalf("unexpected second reset at position %d", i)
+		}
+	}
+}
+
+func TestWithCacheMetrics_InvalidationCallback(t *testing.T) {
+	ctx := context.Background()
+	repo := newNotifyingFakeServiceRepository()
+
+	var mu sync.Mutex
+	var invalidationCalls int
+
+	svc, err := New(ctx, repo, WithCacheMetrics(
+		func() {},
+		func() {
+			mu.Lock()
+			defer mu.Unlock()
+			invalidationCalls++
+		},
+		func() {},
+		func(string, float64) {},
+	))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	_ = svc
+
+	repo.notifyInvalidation()
+
+	waitForCondition(t, time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return invalidationCalls > 0
+	})
+}
+
 func waitForCondition(t *testing.T, timeout time.Duration, check func() bool) {
 	t.Helper()
 

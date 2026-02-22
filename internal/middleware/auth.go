@@ -22,12 +22,32 @@ type TokenValidator interface {
 	ValidateToken(ctx context.Context, token string) (string, error)
 }
 
+// AuthOption configures optional auth middleware parameters.
+type AuthOption func(*authConfig)
+
+type authConfig struct {
+	onFailure func()
+}
+
+// WithOnAuthFailure registers a callback invoked on every authentication
+// failure (e.g. to increment a Prometheus counter).
+func WithOnAuthFailure(fn func()) AuthOption {
+	return func(c *authConfig) { c.onFailure = fn }
+}
+
 // HTTPBearerAuthMiddleware enforces bearer-token auth for HTTP handlers.
-func HTTPBearerAuthMiddleware(validator TokenValidator) func(http.Handler) http.Handler {
+func HTTPBearerAuthMiddleware(validator TokenValidator, opts ...AuthOption) func(http.Handler) http.Handler {
+	cfg := authConfig{}
+	for _, o := range opts {
+		o(&cfg)
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			projectID, err := authorizeHTTP(r.Context(), r.Header.Get("Authorization"), validator)
 			if err != nil {
+				if cfg.onFailure != nil {
+					cfg.onFailure()
+				}
 				writeHTTPUnauthorized(w)
 				return
 			}
@@ -38,10 +58,17 @@ func HTTPBearerAuthMiddleware(validator TokenValidator) func(http.Handler) http.
 }
 
 // UnaryBearerAuthInterceptor enforces bearer-token auth for unary gRPC requests.
-func UnaryBearerAuthInterceptor(validator TokenValidator) grpc.UnaryServerInterceptor {
+func UnaryBearerAuthInterceptor(validator TokenValidator, opts ...AuthOption) grpc.UnaryServerInterceptor {
+	cfg := authConfig{}
+	for _, o := range opts {
+		o(&cfg)
+	}
 	return func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		projectID, err := authorizeGRPC(ctx, validator)
 		if err != nil {
+			if cfg.onFailure != nil {
+				cfg.onFailure()
+			}
 			return nil, status.Error(codes.Unauthenticated, "unauthorized")
 		}
 		newCtx := context.WithValue(ctx, projectIDKey, projectID)
@@ -50,10 +77,17 @@ func UnaryBearerAuthInterceptor(validator TokenValidator) grpc.UnaryServerInterc
 }
 
 // StreamBearerAuthInterceptor enforces bearer-token auth for streaming gRPC requests.
-func StreamBearerAuthInterceptor(validator TokenValidator) grpc.StreamServerInterceptor {
+func StreamBearerAuthInterceptor(validator TokenValidator, opts ...AuthOption) grpc.StreamServerInterceptor {
+	cfg := authConfig{}
+	for _, o := range opts {
+		o(&cfg)
+	}
 	return func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		projectID, err := authorizeGRPC(ss.Context(), validator)
 		if err != nil {
+			if cfg.onFailure != nil {
+				cfg.onFailure()
+			}
 			return status.Error(codes.Unauthenticated, "unauthorized")
 		}
 		
