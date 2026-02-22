@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/matt-riley/flagz/compare/v1.3.1...v1.4.0) (2026-02-22)
+
+
+### Features
+
+* API key ID context propagation ([#34](https://github.com/matt-riley/flagz/issues/34)) ([bb75d6e](https://github.com/matt-riley/flagz/commit/bb75d6e674c0c2301b205670ed0b7b53bd3b6a98))
+
 ## [1.3.1](https://github.com/matt-riley/flagz/compare/v1.3.0...v1.3.1) (2026-02-22)
 
 
