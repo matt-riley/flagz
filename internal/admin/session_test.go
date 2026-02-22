@@ -113,37 +113,6 @@ func TestSetSessionCookie(t *testing.T) {
 	}
 }
 
-func TestRecordLoginAttempt_MaxTrackedIPs(t *testing.T) {
-	mgr := &SessionManager{
-		loginAttempts: make(map[string][]time.Time),
-	}
-
-	// Fill the map to capacity
-	for i := 0; i < maxTrackedIPs; i++ {
-		ip := fmt.Sprintf("10.0.%d.%d", i/256, i%256)
-		mgr.RecordLoginAttempt(ip)
-	}
-
-	if len(mgr.loginAttempts) != maxTrackedIPs {
-		t.Fatalf("expected %d tracked IPs, got %d", maxTrackedIPs, len(mgr.loginAttempts))
-	}
-
-	// New IP should be silently dropped
-	mgr.RecordLoginAttempt("192.168.99.99")
-	if _, exists := mgr.loginAttempts["192.168.99.99"]; exists {
-		t.Fatal("new IP should be dropped when at maxTrackedIPs capacity")
-	}
-
-	// Existing IP should still be able to record
-	existingIP := "10.0.0.0"
-	before := len(mgr.loginAttempts[existingIP])
-	mgr.RecordLoginAttempt(existingIP)
-	after := len(mgr.loginAttempts[existingIP])
-	if after != before+1 {
-		t.Fatalf("existing IP should still record attempts: before=%d, after=%d", before, after)
-	}
-}
-
 func TestClearSessionCookie(t *testing.T) {
 	mgr := &SessionManager{}
 
@@ -161,5 +130,56 @@ func TestClearSessionCookie(t *testing.T) {
 	}
 	if cookie.MaxAge != -1 {
 		t.Fatalf("cleared cookie MaxAge = %d, want -1", cookie.MaxAge)
+	}
+}
+
+func TestRecordLoginAttempt_MaxTrackedIPs(t *testing.T) {
+	mgr := &SessionManager{
+		loginAttempts: make(map[string][]time.Time),
+	}
+
+	// Fill to capacity with maxTrackedIPs distinct IPs.
+	for i := 0; i < maxTrackedIPs; i++ {
+		ip := fmt.Sprintf("10.0.%d.%d", i/256, i%256)
+		mgr.RecordLoginAttempt(ip)
+	}
+
+	if len(mgr.loginAttempts) != maxTrackedIPs {
+		t.Fatalf("expected %d tracked IPs, got %d", maxTrackedIPs, len(mgr.loginAttempts))
+	}
+
+	// A new IP beyond the limit should be silently dropped.
+	mgr.RecordLoginAttempt("192.168.99.99")
+	if _, exists := mgr.loginAttempts["192.168.99.99"]; exists {
+		t.Fatal("new IP should not be added when at maxTrackedIPs capacity")
+	}
+	if len(mgr.loginAttempts) != maxTrackedIPs {
+		t.Fatalf("tracked IPs count should remain %d, got %d", maxTrackedIPs, len(mgr.loginAttempts))
+	}
+
+	// An existing IP should still be able to record attempts at capacity.
+	existingIP := "10.0.0.0"
+	before := len(mgr.loginAttempts[existingIP])
+	mgr.RecordLoginAttempt(existingIP)
+	after := len(mgr.loginAttempts[existingIP])
+	if after != before+1 {
+		t.Fatalf("existing IP should record attempt: expected %d attempts, got %d", before+1, after)
+	}
+}
+
+func TestRecordLoginAttempt_Normal(t *testing.T) {
+	mgr := &SessionManager{
+		loginAttempts: make(map[string][]time.Time),
+	}
+
+	mgr.RecordLoginAttempt("10.0.0.1")
+	mgr.RecordLoginAttempt("10.0.0.1")
+	mgr.RecordLoginAttempt("10.0.0.2")
+
+	if got := len(mgr.loginAttempts["10.0.0.1"]); got != 2 {
+		t.Fatalf("expected 2 attempts for 10.0.0.1, got %d", got)
+	}
+	if got := len(mgr.loginAttempts["10.0.0.2"]); got != 1 {
+		t.Fatalf("expected 1 attempt for 10.0.0.2, got %d", got)
 	}
 }
