@@ -125,9 +125,11 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 			SameSite: http.SameSiteStrictMode,
 			Secure:   isSecure,
 		})
-		Render(w, "setup.html", map[string]any{
+		if err := Render(w, "setup.html", map[string]any{
 			"CSRFToken": csrfToken,
-		})
+		}); err != nil {
+			log.Printf("render error: %v", err)
+		}
 		return
 	}
 
@@ -141,23 +143,31 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		confirm := r.FormValue("confirm_password")
 
 		if len(username) < 3 || len(username) > 50 {
-			Render(w, "setup.html", map[string]any{"Error": "Username must be between 3 and 50 characters"})
+			if err := Render(w, "setup.html", map[string]any{"Error": "Username must be between 3 and 50 characters"}); err != nil {
+				log.Printf("render error: %v", err)
+			}
 			return
 		}
 		for _, c := range username {
 			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.') {
-				Render(w, "setup.html", map[string]any{"Error": "Username may only contain letters, digits, underscores, hyphens, and dots"})
+				if err := Render(w, "setup.html", map[string]any{"Error": "Username may only contain letters, digits, underscores, hyphens, and dots"}); err != nil {
+					log.Printf("render error: %v", err)
+				}
 				return
 			}
 		}
 
 		if password != confirm {
-			Render(w, "setup.html", map[string]any{"Error": "Passwords do not match"})
+			if err := Render(w, "setup.html", map[string]any{"Error": "Passwords do not match"}); err != nil {
+				log.Printf("render error: %v", err)
+			}
 			return
 		}
 
 		if len(password) < 12 {
-			Render(w, "setup.html", map[string]any{"Error": "Password must be at least 12 characters"})
+			if err := Render(w, "setup.html", map[string]any{"Error": "Password must be at least 12 characters"}); err != nil {
+				log.Printf("render error: %v", err)
+			}
 			return
 		}
 
@@ -168,8 +178,14 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if _, err := h.Repo.CreateAdminUser(r.Context(), username, hash); err != nil {
+			if strings.Contains(err.Error(), "duplicate key") {
+				http.Redirect(w, r, "/login", http.StatusFound)
+				return
+			}
 			log.Printf("Failed to create admin user: %v", err)
-			Render(w, "setup.html", map[string]any{"Error": "Failed to create user"})
+			if err := Render(w, "setup.html", map[string]any{"Error": "Failed to create user"}); err != nil {
+				log.Printf("render error: %v", err)
+			}
 			return
 		}
 
@@ -189,9 +205,11 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 			SameSite: http.SameSiteStrictMode,
 			Secure:   isSecure,
 		})
-		Render(w, "login.html", map[string]any{
+		if err := Render(w, "login.html", map[string]any{
 			"CSRFToken": csrfToken,
-		})
+		}); err != nil {
+			log.Printf("render error: %v", err)
+		}
 		return
 	}
 
@@ -203,13 +221,24 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
 
-		remoteAddr := r.RemoteAddr
-		if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
-			remoteAddr = host
+		remoteAddr := r.Header.Get("X-Real-IP")
+		if remoteAddr == "" {
+			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+				remoteAddr, _, _ = strings.Cut(xff, ",")
+				remoteAddr = strings.TrimSpace(remoteAddr)
+			}
+		}
+		if remoteAddr == "" {
+			remoteAddr = r.RemoteAddr
+			if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+				remoteAddr = host
+			}
 		}
 		
 		if allowed := h.SessionMgr.CheckLoginRateLimit(remoteAddr); !allowed {
-			Render(w, "login.html", map[string]any{"Error": "Too many attempts. Please try again later."})
+			if err := Render(w, "login.html", map[string]any{"Error": "Too many attempts. Please try again later."}); err != nil {
+				log.Printf("render error: %v", err)
+			}
 			return
 		}
 
@@ -218,14 +247,18 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 			h.SessionMgr.RecordLoginAttempt(remoteAddr)
 			// Don't reveal if user exists vs db error, generally
 			// For admin portal, generic error is fine
-			Render(w, "login.html", map[string]any{"Error": "Invalid credentials"})
+			if err := Render(w, "login.html", map[string]any{"Error": "Invalid credentials"}); err != nil {
+				log.Printf("render error: %v", err)
+			}
 			return
 		}
 
 		match, err := VerifyPassword(password, user.PasswordHash)
 		if err != nil || !match {
 			h.SessionMgr.RecordLoginAttempt(remoteAddr)
-			Render(w, "login.html", map[string]any{"Error": "Invalid credentials"})
+			if err := Render(w, "login.html", map[string]any{"Error": "Invalid credentials"}); err != nil {
+				log.Printf("render error: %v", err)
+			}
 			return
 		}
 
@@ -257,7 +290,15 @@ func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}
-	user, _ := h.Repo.GetAdminUserByID(r.Context(), session.AdminUserID)
+	user, err := h.Repo.GetAdminUserByID(r.Context(), session.AdminUserID)
+	if err != nil {
+		if cookie, cerr := r.Cookie("flagz_admin_session"); cerr == nil {
+			h.SessionMgr.InvalidateSession(r.Context(), cookie.Value)
+		}
+		h.SessionMgr.ClearSessionCookie(w)
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
 
 	projects, err := h.Repo.ListProjects(r.Context())
 	if err != nil {
@@ -265,11 +306,13 @@ func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	Render(w, "dashboard.html", map[string]any{
+	if err := Render(w, "dashboard.html", map[string]any{
 		"User":      user,
 		"Projects":  projects,
 		"CSRFToken": session.CSRFToken,
-	})
+	}); err != nil {
+		log.Printf("render error: %v", err)
+	}
 }
 
 func (h *Handler) handleProjects(w http.ResponseWriter, r *http.Request) {
@@ -334,12 +377,14 @@ func (h *Handler) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	Render(w, "project.html", map[string]any{
+	if err := Render(w, "project.html", map[string]any{
 		"User":      user,
 		"Project":   project,
 		"Flags":     flags,
 		"CSRFToken": session.CSRFToken,
-	})
+	}); err != nil {
+		log.Printf("render error: %v", err)
+	}
 }
 
 func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *repository.Project, subPath []string) {

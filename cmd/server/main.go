@@ -108,7 +108,7 @@ func run() error {
 			Hostname: cfg.AdminHostname,
 			AuthKey:  cfg.TSAuthKey,
 			Dir:      dir,
-			Logf:     func(format string, args ...any) {}, // Quiet logs
+			Logf:     func(format string, args ...any) { log.Printf("[tailscale] "+format, args...) },
 		}
 
 		// Create admin session manager
@@ -125,8 +125,17 @@ func run() error {
 		}
 		log.Printf("Admin portal listening on http://%s (Tailscale)", cfg.AdminHostname)
 
+		adminServer := &http.Server{Handler: adminHandler}
 		go func() {
-			if err := http.Serve(adminLis, adminHandler); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			<-ctx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			defer cancel()
+			if err := adminServer.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("admin server shutdown: %v", err)
+			}
+		}()
+		go func() {
+			if err := adminServer.Serve(adminLis); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Printf("Admin server error: %v", err)
 			}
 		}()

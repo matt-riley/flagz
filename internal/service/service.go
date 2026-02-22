@@ -223,6 +223,9 @@ func (s *Service) GetFlag(ctx context.Context, projectID, key string) (repositor
 
 // ListFlags returns all flags for a given project from the in-memory cache, sorted by key.
 func (s *Service) ListFlags(_ context.Context, projectID string) ([]repository.Flag, error) {
+	if strings.TrimSpace(projectID) == "" {
+		return nil, ErrProjectIDRequired
+	}
 	s.mu.RLock()
 	projectFlags, ok := s.cache[projectID]
 	if !ok {

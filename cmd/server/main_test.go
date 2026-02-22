@@ -28,7 +28,7 @@ func TestNewHTTPHandlerProtectsV1RoutesIncludingEscapedPaths(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	validator := &fakeHTTPTokenValidator{}
+	validator := &fakeHTTPTokenValidator{projectID: "proj-test"}
 	handler := newHTTPHandler(apiHandler, validator)
 
 	t.Run("unauthenticated escaped v1 path is rejected", func(t *testing.T) {

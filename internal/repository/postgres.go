@@ -252,7 +252,7 @@ func (r *PostgresRepository) DeleteFlag(ctx context.Context, projectID, key stri
 	return nil
 }
 
-// ValidateAPIKey returns the stored hash for a non-revoked key ID.
+// ValidateAPIKey returns the stored hash and project ID for a non-revoked key ID.
 // Callers should do constant-time comparison outside this package.
 func (r *PostgresRepository) ValidateAPIKey(ctx context.Context, id string) (string, string, error) {
 	var keyHash string
