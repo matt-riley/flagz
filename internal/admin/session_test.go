@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -109,6 +110,37 @@ func TestSetSessionCookie(t *testing.T) {
 	}
 	if cookie.SameSite != http.SameSiteLaxMode {
 		t.Fatalf("cookie SameSite = %v, want Lax", cookie.SameSite)
+	}
+}
+
+func TestRecordLoginAttempt_MaxTrackedIPs(t *testing.T) {
+	mgr := &SessionManager{
+		loginAttempts: make(map[string][]time.Time),
+	}
+
+	// Fill the map to capacity
+	for i := 0; i < maxTrackedIPs; i++ {
+		ip := fmt.Sprintf("10.0.%d.%d", i/256, i%256)
+		mgr.RecordLoginAttempt(ip)
+	}
+
+	if len(mgr.loginAttempts) != maxTrackedIPs {
+		t.Fatalf("expected %d tracked IPs, got %d", maxTrackedIPs, len(mgr.loginAttempts))
+	}
+
+	// New IP should be silently dropped
+	mgr.RecordLoginAttempt("192.168.99.99")
+	if _, exists := mgr.loginAttempts["192.168.99.99"]; exists {
+		t.Fatal("new IP should be dropped when at maxTrackedIPs capacity")
+	}
+
+	// Existing IP should still be able to record
+	existingIP := "10.0.0.0"
+	before := len(mgr.loginAttempts[existingIP])
+	mgr.RecordLoginAttempt(existingIP)
+	after := len(mgr.loginAttempts[existingIP])
+	if after != before+1 {
+		t.Fatalf("existing IP should still record attempts: before=%d, after=%d", before, after)
 	}
 }
 
