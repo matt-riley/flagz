@@ -32,6 +32,9 @@ import (
 	"github.com/matt-riley/flagz/internal/repository"
 	"github.com/matt-riley/flagz/internal/server"
 	"github.com/matt-riley/flagz/internal/service"
+	"github.com/matt-riley/flagz/internal/tracing"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"google.golang.org/grpc"
 	"tailscale.com/tsnet"
 )
@@ -60,6 +63,12 @@ func run() error {
 	log := logging.New(cfg.LogLevel)
 	slog.SetDefault(log)
 
+	shutdownTracer, err := tracing.Init(context.Background())
+	if err != nil {
+		return fmt.Errorf("init tracing: %w", err)
+	}
+	defer shutdownTracer(context.Background())
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -86,13 +95,14 @@ func run() error {
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpHandler,
+		Handler:           otelhttp.NewHandler(httpHandler, "flagz-http"),
 		ReadHeaderTimeout: httpReadHeaderTimeout,
 		ReadTimeout:       httpReadTimeout,
 		IdleTimeout:       httpIdleTimeout,
 	}
 
 	grpcServer := grpc.NewServer(
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.ChainUnaryInterceptor(
 			middleware.UnaryBearerAuthInterceptor(tokenValidator, authFailure),
 			m.UnaryServerInterceptor(),
