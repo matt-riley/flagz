@@ -10,10 +10,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/matt-riley/flagz/internal/core"
+	"github.com/matt-riley/flagz/internal/metrics"
 	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 	"github.com/matt-riley/flagz/internal/service"
@@ -30,8 +30,8 @@ var errJSONBodyTooLarge = errors.New("json request body too large")
 // evaluation, SSE streaming, health checks, and metrics.
 type HTTPServer struct {
 	service            Service
+	metrics            *metrics.Metrics
 	streamPollInterval time.Duration
-	requestsTotal      atomic.Uint64
 }
 
 type evaluateJSONRequest struct {
@@ -54,12 +54,19 @@ type evaluateJSONResponse struct {
 // NewHTTPHandler returns an [http.Handler] wired with all flagz routes and a
 // default stream poll interval of 1 second.
 func NewHTTPHandler(svc Service) http.Handler {
-	return NewHTTPHandlerWithStreamPollInterval(svc, defaultStreamPollInterval)
+	return NewHTTPHandlerWithOptions(svc, defaultStreamPollInterval, nil)
 }
 
 // NewHTTPHandlerWithStreamPollInterval returns an [http.Handler] wired with all
 // flagz routes using the specified stream poll interval for SSE.
 func NewHTTPHandlerWithStreamPollInterval(svc Service, streamPollInterval time.Duration) http.Handler {
+	return NewHTTPHandlerWithOptions(svc, streamPollInterval, nil)
+}
+
+// NewHTTPHandlerWithOptions returns an [http.Handler] wired with all flagz
+// routes using the specified stream poll interval and metrics. If m is nil, a
+// default [metrics.Metrics] instance is created.
+func NewHTTPHandlerWithOptions(svc Service, streamPollInterval time.Duration, m *metrics.Metrics) http.Handler {
 	if svc == nil {
 		panic("service is nil")
 	}
@@ -68,8 +75,13 @@ func NewHTTPHandlerWithStreamPollInterval(svc Service, streamPollInterval time.D
 		streamPollInterval = defaultStreamPollInterval
 	}
 
+	if m == nil {
+		m = metrics.New()
+	}
+
 	server := &HTTPServer{
 		service:            svc,
+		metrics:            m,
 		streamPollInterval: streamPollInterval,
 	}
 
@@ -89,9 +101,45 @@ func NewHTTPHandlerWithStreamPollInterval(svc Service, streamPollInterval time.D
 
 func (s *HTTPServer) withMetrics(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.requestsTotal.Add(1)
-		next.ServeHTTP(w, r)
+		start := time.Now()
+		rw := &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
+		next.ServeHTTP(rw, r)
+
+		route := routePattern(r)
+		status := strconv.Itoa(rw.statusCode)
+		s.metrics.HTTPRequestsTotal.WithLabelValues(r.Method, route, status).Inc()
+		s.metrics.HTTPRequestDuration.WithLabelValues(r.Method, route, status).Observe(time.Since(start).Seconds())
 	})
+}
+
+// statusRecorder wraps [http.ResponseWriter] to capture the status code.
+type statusRecorder struct {
+	http.ResponseWriter
+	statusCode  int
+	wroteHeader bool
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	if !r.wroteHeader {
+		r.statusCode = code
+		r.wroteHeader = true
+	}
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// routePattern returns the matched route pattern for metrics labels,
+// falling back to "unknown" if no pattern is available.
+func routePattern(r *http.Request) string {
+	if pat := r.Pattern; pat != "" {
+		return pat
+	}
+	return "unknown"
 }
 
 func (s *HTTPServer) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
@@ -289,6 +337,9 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.metrics.ActiveStreams.WithLabelValues("sse").Inc()
+	defer s.metrics.ActiveStreams.WithLabelValues("sse").Dec()
+
 	currentEventID := lastEventID
 	writeEvents := func(events []repository.FlagEvent) error {
 		for _, event := range events {
@@ -356,11 +407,8 @@ func (s *HTTPServer) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *HTTPServer) handleMetrics(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	_, _ = fmt.Fprintf(w, "# HELP flagz_http_requests_total Total number of HTTP requests.\n")
-	_, _ = fmt.Fprintf(w, "# TYPE flagz_http_requests_total counter\n")
-	_, _ = fmt.Fprintf(w, "flagz_http_requests_total %d\n", s.requestsTotal.Load())
+func (s *HTTPServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	s.metrics.Handler().ServeHTTP(w, r)
 }
 
 func parseLastEventID(value string) (int64, error) {

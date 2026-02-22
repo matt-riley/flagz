@@ -27,6 +27,7 @@ import (
 	"github.com/matt-riley/flagz/internal/admin"
 	"github.com/matt-riley/flagz/internal/config"
 	"github.com/matt-riley/flagz/internal/logging"
+	"github.com/matt-riley/flagz/internal/metrics"
 	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 	"github.com/matt-riley/flagz/internal/server"
@@ -75,7 +76,8 @@ func run() error {
 	}
 
 	tokenValidator := &apiKeyTokenValidator{lookup: repo}
-	apiHandler := server.NewHTTPHandlerWithStreamPollInterval(svc, cfg.StreamPollInterval)
+	m := metrics.New()
+	apiHandler := server.NewHTTPHandlerWithOptions(svc, cfg.StreamPollInterval, m)
 	httpHandler := newHTTPHandler(apiHandler, tokenValidator)
 
 	httpServer := &http.Server{
