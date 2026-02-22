@@ -112,7 +112,7 @@ func run() error {
 		}
 
 		// Create admin session manager
-		sessionMgr := admin.NewSessionManager(repo, cfg.SessionSecret)
+		sessionMgr := admin.NewSessionManager(ctx, repo, cfg.SessionSecret)
 
 		// Create admin handler
 		adminHandler := admin.NewHandler(repo, svc, sessionMgr, cfg.AdminHostname)

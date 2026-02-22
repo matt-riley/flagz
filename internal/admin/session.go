@@ -38,7 +38,7 @@ type SessionManager struct {
 	mu            sync.Mutex
 }
 
-func NewSessionManager(repo *repository.PostgresRepository, sessionSecret string) *SessionManager {
+func NewSessionManager(ctx context.Context, repo *repository.PostgresRepository, sessionSecret string) *SessionManager {
 	mgr := &SessionManager{
 		repo:          repo,
 		sessionSecret: []byte(sessionSecret),
@@ -49,19 +49,24 @@ func NewSessionManager(repo *repository.PostgresRepository, sessionSecret string
 	go func() {
 		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()
-		for range ticker.C {
-			mgr.mu.Lock()
-			now := time.Now()
-			for ip, attempts := range mgr.loginAttempts {
-				if len(attempts) == 0 || now.Sub(attempts[len(attempts)-1]) > loginWindow {
-					delete(mgr.loginAttempts, ip)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				mgr.mu.Lock()
+				now := time.Now()
+				for ip, attempts := range mgr.loginAttempts {
+					if len(attempts) == 0 || now.Sub(attempts[len(attempts)-1]) > loginWindow {
+						delete(mgr.loginAttempts, ip)
+					}
 				}
-			}
-			mgr.mu.Unlock()
+				mgr.mu.Unlock()
 
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			_ = repo.DeleteExpiredAdminSessions(ctx)
-			cancel()
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				_ = repo.DeleteExpiredAdminSessions(cleanupCtx)
+				cancel()
+			}
 		}
 	}()
 	return mgr
@@ -110,11 +115,6 @@ func (m *SessionManager) ValidateSession(ctx context.Context, rawToken string) (
 	idHash := m.hashToken(rawToken)
 	session, err := m.repo.GetAdminSession(ctx, idHash)
 	if err != nil {
-		return repository.AdminSession{}, ErrUnauthorized
-	}
-
-	if time.Now().After(session.ExpiresAt) {
-		_ = m.repo.DeleteAdminSession(ctx, idHash)
 		return repository.AdminSession{}, ErrUnauthorized
 	}
 

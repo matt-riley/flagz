@@ -31,7 +31,7 @@ INSERT INTO projects (id, name, description) VALUES
     ('11111111-1111-1111-1111-111111111111', 'Default', 'Auto-created project for pre-existing flags');
 
 -- Modify flags table for multi-tenancy
-ALTER TABLE flags ADD COLUMN project_id UUID REFERENCES projects(id);
+ALTER TABLE flags ADD COLUMN project_id UUID REFERENCES projects(id) ON DELETE CASCADE;
 UPDATE flags SET project_id = '11111111-1111-1111-1111-111111111111' WHERE project_id IS NULL;
 ALTER TABLE flags ALTER COLUMN project_id SET NOT NULL;
 
@@ -40,13 +40,13 @@ ALTER TABLE flags DROP CONSTRAINT flags_pkey;
 ALTER TABLE flags ADD PRIMARY KEY (project_id, key);
 
 -- Modify api_keys table
-ALTER TABLE api_keys ADD COLUMN project_id UUID REFERENCES projects(id);
+ALTER TABLE api_keys ADD COLUMN project_id UUID REFERENCES projects(id) ON DELETE CASCADE;
 UPDATE api_keys SET project_id = '11111111-1111-1111-1111-111111111111' WHERE project_id IS NULL;
 ALTER TABLE api_keys ALTER COLUMN project_id SET NOT NULL;
 CREATE INDEX idx_api_keys_project_id ON api_keys (project_id);
 
 -- Modify flag_events table
-ALTER TABLE flag_events ADD COLUMN project_id UUID REFERENCES projects(id);
+ALTER TABLE flag_events ADD COLUMN project_id UUID REFERENCES projects(id) ON DELETE CASCADE;
 UPDATE flag_events SET project_id = '11111111-1111-1111-1111-111111111111' WHERE project_id IS NULL;
 ALTER TABLE flag_events ALTER COLUMN project_id SET NOT NULL;
 
