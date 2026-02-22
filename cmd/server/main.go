@@ -71,6 +71,7 @@ func run() error {
 
 	repo := repository.NewPostgresRepository(pool)
 	m := metrics.New()
+	metrics.RegisterPoolMetrics(m.Registry, pool)
 	svc, err := service.New(ctx, repo,
 		service.WithLogger(log),
 		service.WithCacheMetrics(m.IncCacheLoads, m.IncCacheInvalidations, m.ResetCacheSize, m.SetCacheSize),
