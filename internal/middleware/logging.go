@@ -146,3 +146,45 @@ func UnaryRequestLoggingInterceptor(logger *slog.Logger) grpc.UnaryServerInterce
 		return resp, err
 	}
 }
+
+type loggingServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (l *loggingServerStream) Context() context.Context {
+	return l.ctx
+}
+
+// StreamRequestLoggingInterceptor returns a gRPC stream server interceptor that
+// logs each streaming call with a unique request ID, method, status code, and duration.
+func StreamRequestLoggingInterceptor(logger *slog.Logger) grpc.StreamServerInterceptor {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		reqID := generateRequestID()
+		reqLogger := logger.With(slog.String("request_id", reqID))
+
+		ctx := context.WithValue(ss.Context(), requestIDKey, reqID)
+		ctx = context.WithValue(ctx, loggerKey, reqLogger)
+
+		reqLogger.InfoContext(ctx, "stream started",
+			slog.String("method", info.FullMethod),
+		)
+
+		start := time.Now()
+		err := handler(srv, &loggingServerStream{ServerStream: ss, ctx: ctx})
+		duration := time.Since(start)
+
+		code := status.Code(err)
+		reqLogger.InfoContext(ctx, "stream completed",
+			slog.String("method", info.FullMethod),
+			slog.String("status_code", code.String()),
+			slog.Float64("duration_ms", float64(duration.Nanoseconds())/1e6),
+		)
+
+		return err
+	}
+}

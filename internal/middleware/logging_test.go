@@ -269,3 +269,76 @@ func TestResponseWriterCapture(t *testing.T) {
 		}
 	})
 }
+
+func TestStreamRequestLoggingInterceptor(t *testing.T) {
+	t.Run("logs stream with request_id", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+		interceptor := StreamRequestLoggingInterceptor(logger)
+		info := &grpc.StreamServerInfo{FullMethod: "/flagz.v1.FlagService/WatchFlag"}
+		stream := &testServerStream{ctx: context.Background()}
+
+		err := interceptor(struct{}{}, stream, info, func(srv any, ss grpc.ServerStream) error {
+			id, ok := RequestIDFromContext(ss.Context())
+			if !ok {
+				t.Fatal("expected request_id in context")
+			}
+			if len(id) != 16 {
+				t.Fatalf("expected 16-char request_id, got %q", id)
+			}
+			return nil
+		})
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		output := buf.String()
+		if !strings.Contains(output, "stream started") {
+			t.Fatalf("expected 'stream started' in log output, got: %s", output)
+		}
+		if !strings.Contains(output, "stream completed") {
+			t.Fatalf("expected 'stream completed' in log output, got: %s", output)
+		}
+		if !strings.Contains(output, "/flagz.v1.FlagService/WatchFlag") {
+			t.Fatalf("expected method in log output, got: %s", output)
+		}
+		if !strings.Contains(output, "status_code=OK") {
+			t.Fatalf("expected status_code=OK in log output, got: %s", output)
+		}
+	})
+
+	t.Run("logs error status code", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+		interceptor := StreamRequestLoggingInterceptor(logger)
+		info := &grpc.StreamServerInfo{FullMethod: "/flagz.v1.FlagService/WatchFlag"}
+		stream := &testServerStream{ctx: context.Background()}
+
+		err := interceptor(struct{}{}, stream, info, func(srv any, ss grpc.ServerStream) error {
+			return status.Error(codes.Internal, "oops")
+		})
+
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(buf.String(), "status_code=Internal") {
+			t.Fatalf("expected status_code=Internal in log output, got: %s", buf.String())
+		}
+	})
+
+	t.Run("nil logger uses default", func(t *testing.T) {
+		interceptor := StreamRequestLoggingInterceptor(nil)
+		info := &grpc.StreamServerInfo{FullMethod: "/test"}
+		stream := &testServerStream{ctx: context.Background()}
+
+		err := interceptor(struct{}{}, stream, info, func(srv any, ss grpc.ServerStream) error {
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
