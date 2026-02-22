@@ -305,7 +305,7 @@ func (s *Service) ResolveBatch(ctx context.Context, requests []ResolveRequest) (
 // streaming consumers to poll for updates.
 func (s *Service) ListEventsSince(ctx context.Context, projectID string, eventID int64) ([]repository.FlagEvent, error) {
 	if strings.TrimSpace(projectID) == "" {
-	return nil, errors.New("project ID is required")
+		return nil, errors.New("project ID is required")
 	}
 	events, err := s.repo.ListEventsSince(ctx, projectID, eventID)
 	if err != nil {
