@@ -4,7 +4,9 @@ package integration
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +23,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"github.com/docker/go-connections/nat"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/matt-riley/flagz/internal/repository"
@@ -43,8 +46,9 @@ func runTests(m *testing.M) int {
 			"POSTGRES_USER":     "test",
 			"POSTGRES_PASSWORD": "test",
 		},
-		WaitingFor: wait.ForListeningPort("5432/tcp").
-			WithStartupTimeout(30 * time.Second),
+		WaitingFor: wait.ForSQL("5432/tcp", "pgx", func(host string, port nat.Port) string {
+			return fmt.Sprintf("postgresql://test:test@%s:%s/flagz_test?sslmode=disable", host, port.Port())
+		}).WithStartupTimeout(30 * time.Second),
 	}
 
 	pgContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
@@ -134,10 +138,18 @@ func newRepo() *repository.PostgresRepository {
 	return repository.NewPostgresRepository(testPool)
 }
 
+func randID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
+	return hex.EncodeToString(b[:])
+}
+
 func createTestProject(t *testing.T, repo *repository.PostgresRepository, suffix string) repository.Project {
 	t.Helper()
 	ctx := context.Background()
-	name := fmt.Sprintf("test-%s-%d", suffix, time.Now().UnixNano())
+	name := fmt.Sprintf("test-%s-%s", suffix, randID())
 	p, err := repo.CreateProject(ctx, name, "integration test project")
 	if err != nil {
 		t.Fatalf("create test project: %v", err)
@@ -148,8 +160,8 @@ func createTestProject(t *testing.T, repo *repository.PostgresRepository, suffix
 // insertAPIKey inserts an API key directly and returns (keyID, rawSecret).
 func insertAPIKey(t *testing.T, projectID string) (string, string) {
 	t.Helper()
-	keyID := fmt.Sprintf("key-%d", time.Now().UnixNano())
-	rawSecret := fmt.Sprintf("secret-%d", time.Now().UnixNano())
+	keyID := fmt.Sprintf("key-%s", randID())
+	rawSecret := fmt.Sprintf("secret-%s", randID())
 	// Use bcrypt (current production format) rather than SHA-256 (legacy).
 	hashBytes, err := bcrypt.GenerateFromPassword([]byte(rawSecret), bcrypt.DefaultCost)
 	if err != nil {
