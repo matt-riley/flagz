@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -37,7 +38,8 @@ func LoggerFromContext(ctx context.Context) *slog.Logger {
 func generateRequestID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
-		return "unknown"
+		// Fallback to time-based ID if crypto/rand fails
+		return fmt.Sprintf("%016x", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)
 }
@@ -50,10 +52,11 @@ type responseWriter struct {
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
-	if !rw.written {
-		rw.statusCode = code
-		rw.written = true
+	if rw.written {
+		return
 	}
+	rw.statusCode = code
+	rw.written = true
 	rw.ResponseWriter.WriteHeader(code)
 }
 
@@ -63,6 +66,13 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 		rw.written = true
 	}
 	return rw.ResponseWriter.Write(b)
+}
+
+// Flush implements http.Flusher by delegating to the underlying writer if supported.
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // Unwrap supports http.ResponseController and middleware that unwrap writers.
