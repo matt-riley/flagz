@@ -528,12 +528,3 @@ func (v *testTokenValidator) ValidateToken(_ context.Context, token string) (str
 	}
 	return v.projectID, nil
 }
-
-type testServerStream struct {
-	grpc.ServerStream
-	ctx context.Context
-}
-
-func (s *testServerStream) Context() context.Context {
-	return s.ctx
-}
