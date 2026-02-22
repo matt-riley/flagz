@@ -351,9 +351,6 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	rc := http.NewResponseController(w)
 
-	s.metrics.ActiveStreams.WithLabelValues("sse").Inc()
-	defer s.metrics.ActiveStreams.WithLabelValues("sse").Dec()
-
 	currentEventID := lastEventID
 	writeEvents := func(events []repository.FlagEvent) error {
 		for _, event := range events {
@@ -389,6 +386,9 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 	headers.Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 	_ = rc.Flush()
+
+	s.metrics.ActiveStreams.WithLabelValues("sse").Inc()
+	defer s.metrics.ActiveStreams.WithLabelValues("sse").Dec()
 
 	if err := writeEvents(initialEvents); err != nil {
 		return

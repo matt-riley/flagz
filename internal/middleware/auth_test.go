@@ -449,6 +449,66 @@ func TestUnaryOnAuthFailure(t *testing.T) {
 	})
 }
 
+func TestStreamOnAuthFailure(t *testing.T) {
+	t.Run("callback invoked on auth failure", func(t *testing.T) {
+		var counter atomic.Int64
+		validator := &testTokenValidator{expectedToken: "expected"}
+		interceptor := StreamBearerAuthInterceptor(validator, WithOnAuthFailure(func() { counter.Add(1) }))
+
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer bad"))
+		stream := &testServerStream{ctx: ctx}
+
+		err := interceptor(struct{}{}, stream, &grpc.StreamServerInfo{}, func(srv any, ss grpc.ServerStream) error {
+			t.Fatal("expected handler not to be called")
+			return nil
+		})
+
+		if status.Code(err) != codes.Unauthenticated {
+			t.Fatalf("expected unauthenticated, got %v", status.Code(err))
+		}
+		if got := counter.Load(); got != 1 {
+			t.Fatalf("expected callback count 1, got %d", got)
+		}
+	})
+
+	t.Run("callback NOT invoked on success", func(t *testing.T) {
+		var counter atomic.Int64
+		validator := &testTokenValidator{expectedToken: "good", projectID: "proj-123"}
+		interceptor := StreamBearerAuthInterceptor(validator, WithOnAuthFailure(func() { counter.Add(1) }))
+
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer good"))
+		stream := &testServerStream{ctx: ctx}
+
+		err := interceptor(struct{}{}, stream, &grpc.StreamServerInfo{}, func(srv any, ss grpc.ServerStream) error {
+			return nil
+		})
+
+		if err != nil {
+			t.Fatalf("expected nil error, got %v", err)
+		}
+		if got := counter.Load(); got != 0 {
+			t.Fatalf("expected callback count 0, got %d", got)
+		}
+	})
+
+	t.Run("nil callback does not panic", func(t *testing.T) {
+		validator := &testTokenValidator{expectedToken: "expected"}
+		interceptor := StreamBearerAuthInterceptor(validator, WithOnAuthFailure(nil))
+
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer bad"))
+		stream := &testServerStream{ctx: ctx}
+
+		err := interceptor(struct{}{}, stream, &grpc.StreamServerInfo{}, func(srv any, ss grpc.ServerStream) error {
+			t.Fatal("expected handler not to be called")
+			return nil
+		})
+
+		if status.Code(err) != codes.Unauthenticated {
+			t.Fatalf("expected unauthenticated, got %v", status.Code(err))
+		}
+	})
+}
+
 type testTokenValidator struct {
 	expectedToken string
 	err           error

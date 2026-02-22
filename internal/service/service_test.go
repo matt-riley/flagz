@@ -935,6 +935,37 @@ func TestWithCacheMetrics_ResetBeforeUpdate(t *testing.T) {
 	}
 }
 
+func TestWithCacheMetrics_InvalidationCallback(t *testing.T) {
+	ctx := context.Background()
+	repo := newNotifyingFakeServiceRepository()
+
+	var mu sync.Mutex
+	var invalidationCalls int
+
+	svc, err := New(ctx, repo, WithCacheMetrics(
+		func() {},
+		func() {
+			mu.Lock()
+			defer mu.Unlock()
+			invalidationCalls++
+		},
+		func() {},
+		func(string, float64) {},
+	))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	_ = svc
+
+	repo.notifyInvalidation()
+
+	waitForCondition(t, time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return invalidationCalls > 0
+	})
+}
+
 func waitForCondition(t *testing.T, timeout time.Duration, check func() bool) {
 	t.Helper()
 
