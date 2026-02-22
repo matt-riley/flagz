@@ -125,18 +125,23 @@ func TestHTTPBearerAuthMiddleware(t *testing.T) {
 	})
 
 	t.Run("valid token", func(t *testing.T) {
-		validator := &testTokenValidator{expectedToken: "good", projectID: "proj-123"}
+		validator := &testTokenValidator{expectedToken: "keyid1.secret", projectID: "proj-123"}
 		handler := HTTPBearerAuthMiddleware(validator)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Verify project ID in context
 			pid, ok := ProjectIDFromContext(r.Context())
 			if !ok || pid != "proj-123" {
 				t.Errorf("ProjectIDFromContext = %q, %v; want proj-123, true", pid, ok)
 			}
+			// Verify API key ID in context
+			kid, ok := APIKeyIDFromContext(r.Context())
+			if !ok || kid != "keyid1" {
+				t.Errorf("APIKeyIDFromContext = %q, %v; want keyid1, true", kid, ok)
+			}
 			w.WriteHeader(http.StatusNoContent)
 		}))
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("Authorization", "Bearer good")
+		req.Header.Set("Authorization", "Bearer keyid1.secret")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -146,8 +151,33 @@ func TestHTTPBearerAuthMiddleware(t *testing.T) {
 		if !validator.called {
 			t.Fatal("expected validator to be called")
 		}
-		if validator.gotToken != "good" {
-			t.Fatalf("expected token %q, got %q", "good", validator.gotToken)
+		if validator.gotToken != "keyid1.secret" {
+			t.Fatalf("expected token %q, got %q", "keyid1.secret", validator.gotToken)
+		}
+	})
+
+	t.Run("valid token without dot has no key ID", func(t *testing.T) {
+		validator := &testTokenValidator{expectedToken: "nodottoken", projectID: "proj-123"}
+		handler := HTTPBearerAuthMiddleware(validator)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			pid, ok := ProjectIDFromContext(r.Context())
+			if !ok || pid != "proj-123" {
+				t.Errorf("ProjectIDFromContext = %q, %v; want proj-123, true", pid, ok)
+			}
+			// No dot in token means no API key ID extracted
+			_, ok = APIKeyIDFromContext(r.Context())
+			if ok {
+				t.Error("expected no API key ID in context for token without dot")
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer nodottoken")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("expected %d, got %d", http.StatusNoContent, rec.Code)
 		}
 	})
 }
@@ -216,17 +246,20 @@ func TestUnaryBearerAuthInterceptor(t *testing.T) {
 	})
 
 	t.Run("valid token", func(t *testing.T) {
-		validator := &testTokenValidator{expectedToken: "good", projectID: "proj-123"}
+		validator := &testTokenValidator{expectedToken: "keyid2.secret", projectID: "proj-123"}
 		interceptor := UnaryBearerAuthInterceptor(validator)
 		handlerCalled := false
-		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer good"))
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer keyid2.secret"))
 
 		res, err := interceptor(ctx, struct{}{}, &grpc.UnaryServerInfo{}, func(ctx context.Context, req any) (any, error) {
 			handlerCalled = true
-			// Verify project ID in context
 			pid, ok := ProjectIDFromContext(ctx)
 			if !ok || pid != "proj-123" {
 				return nil, status.Errorf(codes.Internal, "ProjectIDFromContext = %q, %v; want proj-123, true", pid, ok)
+			}
+			kid, ok := APIKeyIDFromContext(ctx)
+			if !ok || kid != "keyid2" {
+				return nil, status.Errorf(codes.Internal, "APIKeyIDFromContext = %q, %v; want keyid2, true", kid, ok)
 			}
 			return "ok", nil
 		})
@@ -239,6 +272,28 @@ func TestUnaryBearerAuthInterceptor(t *testing.T) {
 		}
 		if res != "ok" {
 			t.Fatalf("expected response %q, got %#v", "ok", res)
+		}
+	})
+
+	t.Run("valid token without dot has no key ID", func(t *testing.T) {
+		validator := &testTokenValidator{expectedToken: "nodottoken", projectID: "proj-123"}
+		interceptor := UnaryBearerAuthInterceptor(validator)
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer nodottoken"))
+
+		_, err := interceptor(ctx, struct{}{}, &grpc.UnaryServerInfo{}, func(ctx context.Context, _ any) (any, error) {
+			pid, ok := ProjectIDFromContext(ctx)
+			if !ok || pid != "proj-123" {
+				t.Errorf("ProjectIDFromContext = %q, %v; want proj-123, true", pid, ok)
+			}
+			_, ok = APIKeyIDFromContext(ctx)
+			if ok {
+				t.Error("expected no API key ID in context for token without dot")
+			}
+			return "ok", nil
+		})
+
+		if err != nil {
+			t.Fatalf("expected nil error, got %v", err)
 		}
 	})
 }
@@ -266,15 +321,21 @@ func TestStreamBearerAuthInterceptor(t *testing.T) {
 	})
 
 	t.Run("valid token", func(t *testing.T) {
-		validator := &testTokenValidator{expectedToken: "good", projectID: "proj-123"}
+		validator := &testTokenValidator{expectedToken: "keyid3.secret", projectID: "proj-123"}
 		interceptor := StreamBearerAuthInterceptor(validator)
 		handlerCalled := false
-		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer good"))
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer keyid3.secret"))
 
-		err := interceptor(nil, &testServerStream{ctx: ctx}, &grpc.StreamServerInfo{}, func(any, grpc.ServerStream) error {
+		err := interceptor(nil, &testServerStream{ctx: ctx}, &grpc.StreamServerInfo{}, func(_ any, ss grpc.ServerStream) error {
 			handlerCalled = true
-			// Can't easily check context in stream wrapper here without more mocking,
-			// but we trust WrappedServerStream does its job if Unary works.
+			pid, ok := ProjectIDFromContext(ss.Context())
+			if !ok || pid != "proj-123" {
+				t.Errorf("ProjectIDFromContext = %q, %v; want proj-123, true", pid, ok)
+			}
+			kid, ok := APIKeyIDFromContext(ss.Context())
+			if !ok || kid != "keyid3" {
+				t.Errorf("APIKeyIDFromContext = %q, %v; want keyid3, true", kid, ok)
+			}
 			return nil
 		})
 
@@ -283,6 +344,28 @@ func TestStreamBearerAuthInterceptor(t *testing.T) {
 		}
 		if !handlerCalled {
 			t.Fatal("expected handler to be called")
+		}
+	})
+
+	t.Run("valid token without dot has no key ID", func(t *testing.T) {
+		validator := &testTokenValidator{expectedToken: "nodottoken", projectID: "proj-123"}
+		interceptor := StreamBearerAuthInterceptor(validator)
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer nodottoken"))
+
+		err := interceptor(nil, &testServerStream{ctx: ctx}, &grpc.StreamServerInfo{}, func(_ any, ss grpc.ServerStream) error {
+			pid, ok := ProjectIDFromContext(ss.Context())
+			if !ok || pid != "proj-123" {
+				t.Errorf("ProjectIDFromContext = %q, %v; want proj-123, true", pid, ok)
+			}
+			_, ok = APIKeyIDFromContext(ss.Context())
+			if ok {
+				t.Error("expected no API key ID in context for token without dot")
+			}
+			return nil
+		})
+
+		if err != nil {
+			t.Fatalf("expected nil error, got %v", err)
 		}
 	})
 

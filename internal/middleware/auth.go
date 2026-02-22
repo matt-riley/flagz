@@ -52,6 +52,9 @@ func HTTPBearerAuthMiddleware(validator TokenValidator, opts ...AuthOption) func
 				return
 			}
 			ctx := context.WithValue(r.Context(), projectIDKey, projectID)
+			if keyID := apiKeyIDFromBearer(r.Header.Get("Authorization")); keyID != "" {
+				ctx = context.WithValue(ctx, apiKeyIDKey, keyID)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -72,6 +75,9 @@ func UnaryBearerAuthInterceptor(validator TokenValidator, opts ...AuthOption) gr
 			return nil, status.Error(codes.Unauthenticated, "unauthorized")
 		}
 		newCtx := context.WithValue(ctx, projectIDKey, projectID)
+		if keyID := apiKeyIDFromGRPCMetadata(ctx); keyID != "" {
+			newCtx = context.WithValue(newCtx, apiKeyIDKey, keyID)
+		}
 		return handler(newCtx, req)
 	}
 }
@@ -90,13 +96,18 @@ func StreamBearerAuthInterceptor(validator TokenValidator, opts ...AuthOption) g
 			}
 			return status.Error(codes.Unauthenticated, "unauthorized")
 		}
-		
-		// Wrap the stream to inject context with project ID
+
+		ctx := context.WithValue(ss.Context(), projectIDKey, projectID)
+		if keyID := apiKeyIDFromGRPCMetadata(ss.Context()); keyID != "" {
+			ctx = context.WithValue(ctx, apiKeyIDKey, keyID)
+		}
+
+		// Wrap the stream to inject context with project and API key IDs
 		wrappedStream := &wrappedServerStream{
 			ServerStream: ss,
-			ctx:          context.WithValue(ss.Context(), projectIDKey, projectID),
+			ctx:          ctx,
 		}
-		
+
 		return handler(srv, wrappedStream)
 	}
 }
@@ -112,7 +123,10 @@ func (w *wrappedServerStream) Context() context.Context {
 
 type contextKey string
 
-const projectIDKey contextKey = "project_id"
+const (
+	projectIDKey contextKey = "project_id"
+	apiKeyIDKey  contextKey = "api_key_id"
+)
 
 // ProjectIDFromContext retrieves the project ID from the context.
 func ProjectIDFromContext(ctx context.Context) (string, bool) {
@@ -123,6 +137,17 @@ func ProjectIDFromContext(ctx context.Context) (string, bool) {
 // NewContextWithProjectID returns a new context with the given project ID.
 func NewContextWithProjectID(ctx context.Context, projectID string) context.Context {
 	return context.WithValue(ctx, projectIDKey, projectID)
+}
+
+// APIKeyIDFromContext retrieves the API key ID from the context.
+func APIKeyIDFromContext(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(apiKeyIDKey).(string)
+	return id, ok
+}
+
+// NewContextWithAPIKeyID returns a new context with the given API key ID.
+func NewContextWithAPIKeyID(ctx context.Context, keyID string) context.Context {
+	return context.WithValue(ctx, apiKeyIDKey, keyID)
 }
 
 func authorizeHTTP(ctx context.Context, authorizationHeader string, validator TokenValidator) (string, error) {
@@ -197,4 +222,32 @@ func parseBearerToken(authorizationHeader string) (string, error) {
 func writeHTTPUnauthorized(w http.ResponseWriter) {
 	w.Header().Set("WWW-Authenticate", "Bearer")
 	http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+}
+
+// apiKeyIDFromBearer extracts the API key ID (the part before the dot) from
+// a bearer token in format "Bearer keyID.secret".
+func apiKeyIDFromBearer(authHeader string) string {
+	token, err := parseBearerToken(authHeader)
+	if err != nil {
+		return ""
+	}
+	keyID, _, ok := strings.Cut(token, ".")
+	if !ok || keyID == "" {
+		return ""
+	}
+	return keyID
+}
+
+// apiKeyIDFromGRPCMetadata extracts the API key ID from gRPC metadata.
+func apiKeyIDFromGRPCMetadata(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ""
+	}
+	for _, h := range md.Get("authorization") {
+		if keyID := apiKeyIDFromBearer(h); keyID != "" {
+			return keyID
+		}
+	}
+	return ""
 }
