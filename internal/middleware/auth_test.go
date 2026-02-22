@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -330,6 +331,122 @@ func TestAPIKeyMatchesHash(t *testing.T) {
 	if APIKeyMatchesHash("not-hex", "secret") {
 		t.Fatal("expected invalid hash to fail")
 	}
+}
+
+func TestHTTPOnAuthFailure(t *testing.T) {
+	t.Run("callback invoked on invalid token", func(t *testing.T) {
+		var counter atomic.Int64
+		validator := &testTokenValidator{expectedToken: "expected"}
+		handler := HTTPBearerAuthMiddleware(validator, WithOnAuthFailure(func() { counter.Add(1) }))(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			t.Fatal("expected next handler not to be called")
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer bad")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+		if got := counter.Load(); got != 1 {
+			t.Fatalf("expected callback count 1, got %d", got)
+		}
+	})
+
+	t.Run("callback invoked on missing Authorization header", func(t *testing.T) {
+		var counter atomic.Int64
+		validator := &testTokenValidator{}
+		handler := HTTPBearerAuthMiddleware(validator, WithOnAuthFailure(func() { counter.Add(1) }))(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			t.Fatal("expected next handler not to be called")
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+		if got := counter.Load(); got != 1 {
+			t.Fatalf("expected callback count 1, got %d", got)
+		}
+	})
+
+	t.Run("callback NOT invoked on successful auth", func(t *testing.T) {
+		var counter atomic.Int64
+		validator := &testTokenValidator{expectedToken: "good", projectID: "proj-123"}
+		handler := HTTPBearerAuthMiddleware(validator, WithOnAuthFailure(func() { counter.Add(1) }))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer good")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("expected %d, got %d", http.StatusNoContent, rec.Code)
+		}
+		if got := counter.Load(); got != 0 {
+			t.Fatalf("expected callback count 0, got %d", got)
+		}
+	})
+
+	t.Run("nil callback does not panic", func(t *testing.T) {
+		validator := &testTokenValidator{expectedToken: "expected"}
+		handler := HTTPBearerAuthMiddleware(validator)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			t.Fatal("expected next handler not to be called")
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer bad")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+	})
+}
+
+func TestUnaryOnAuthFailure(t *testing.T) {
+	t.Run("callback invoked on auth failure", func(t *testing.T) {
+		var counter atomic.Int64
+		validator := &testTokenValidator{expectedToken: "expected"}
+		interceptor := UnaryBearerAuthInterceptor(validator, WithOnAuthFailure(func() { counter.Add(1) }))
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer bad"))
+
+		_, err := interceptor(ctx, struct{}{}, &grpc.UnaryServerInfo{}, func(context.Context, any) (any, error) {
+			t.Fatal("expected handler not to be called")
+			return nil, nil
+		})
+
+		if status.Code(err) != codes.Unauthenticated {
+			t.Fatalf("expected unauthenticated, got %v", status.Code(err))
+		}
+		if got := counter.Load(); got != 1 {
+			t.Fatalf("expected callback count 1, got %d", got)
+		}
+	})
+
+	t.Run("callback NOT invoked on success", func(t *testing.T) {
+		var counter atomic.Int64
+		validator := &testTokenValidator{expectedToken: "good", projectID: "proj-123"}
+		interceptor := UnaryBearerAuthInterceptor(validator, WithOnAuthFailure(func() { counter.Add(1) }))
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer good"))
+
+		_, err := interceptor(ctx, struct{}{}, &grpc.UnaryServerInfo{}, func(context.Context, any) (any, error) {
+			return "ok", nil
+		})
+
+		if err != nil {
+			t.Fatalf("expected nil error, got %v", err)
+		}
+		if got := counter.Load(); got != 0 {
+			t.Fatalf("expected callback count 0, got %d", got)
+		}
+	})
 }
 
 type testTokenValidator struct {
