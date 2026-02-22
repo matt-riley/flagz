@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.0](https://github.com/matt-riley/flagz/compare/v1.2.0...v1.3.0) (2026-02-22)
+
+
+### Features
+
+* Phase 1 — Structured logging with slog ([#31](https://github.com/matt-riley/flagz/issues/31)) ([eb80c0d](https://github.com/matt-riley/flagz/commit/eb80c0d1427c357f76b6c9eaa98c206c122ec2d6))
+* Phase 2 — Prometheus metrics with client_golang ([#33](https://github.com/matt-riley/flagz/issues/33)) ([086e5a5](https://github.com/matt-riley/flagz/commit/086e5a54213e71c43b5823abb24c4c602d57e037))
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/matt-riley/flagz to v1.2.0 ([#32](https://github.com/matt-riley/flagz/issues/32)) ([ae9201b](https://github.com/matt-riley/flagz/commit/ae9201bba2ccf20bd365d865124bca831dbd6ead))
+
 ## [1.2.0](https://github.com/matt-riley/flagz/compare/v1.1.1...v1.2.0) (2026-02-22)
 
 
