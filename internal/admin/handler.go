@@ -114,7 +114,15 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == "GET" {
-		csrfToken := h.generateCSRFToken() // In a real app, bind this to a pre-session cookie
+		csrfToken := h.generateCSRFToken()
+		http.SetCookie(w, &http.Cookie{
+			Name:     "flagz_csrf",
+			Value:    csrfToken,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+			Secure:   true,
+		})
 		Render(w, "setup.html", map[string]any{
 			"CSRFToken": csrfToken,
 		})
@@ -122,9 +130,24 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == "POST" {
-		username := r.FormValue("username")
+		if !h.validateDoubleSubmitCSRF(r) {
+			http.Error(w, "Forbidden: invalid CSRF token", http.StatusForbidden)
+			return
+		}
+		username := strings.TrimSpace(r.FormValue("username"))
 		password := r.FormValue("password")
 		confirm := r.FormValue("confirm_password")
+
+		if len(username) < 3 || len(username) > 50 {
+			Render(w, "setup.html", map[string]any{"Error": "Username must be between 3 and 50 characters"})
+			return
+		}
+		for _, c := range username {
+			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.') {
+				Render(w, "setup.html", map[string]any{"Error": "Username may only contain letters, digits, underscores, hyphens, and dots"})
+				return
+			}
+		}
 
 		if password != confirm {
 			Render(w, "setup.html", map[string]any{"Error": "Passwords do not match"})
@@ -154,13 +177,26 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
+		csrfToken := h.generateCSRFToken()
+		http.SetCookie(w, &http.Cookie{
+			Name:     "flagz_csrf",
+			Value:    csrfToken,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+			Secure:   true,
+		})
 		Render(w, "login.html", map[string]any{
-			"CSRFToken": h.generateCSRFToken(),
+			"CSRFToken": csrfToken,
 		})
 		return
 	}
 
 	if r.Method == "POST" {
+		if !h.validateDoubleSubmitCSRF(r) {
+			http.Error(w, "Forbidden: invalid CSRF token", http.StatusForbidden)
+			return
+		}
 		username := r.FormValue("username")
 		password := r.FormValue("password")
 
@@ -391,4 +427,19 @@ func (h *Handler) generateCSRFToken() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// validateDoubleSubmitCSRF checks that the CSRF form value matches the
+// flagz_csrf cookie, implementing the double-submit cookie pattern for
+// pre-authentication forms (login, setup).
+func (h *Handler) validateDoubleSubmitCSRF(r *http.Request) bool {
+	cookie, err := r.Cookie("flagz_csrf")
+	if err != nil || cookie.Value == "" {
+		return false
+	}
+	formToken := r.FormValue("csrf_token")
+	if formToken == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(formToken)) == 1
 }

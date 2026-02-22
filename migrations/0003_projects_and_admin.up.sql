@@ -43,6 +43,7 @@ ALTER TABLE flags ADD PRIMARY KEY (project_id, key);
 ALTER TABLE api_keys ADD COLUMN project_id UUID REFERENCES projects(id);
 UPDATE api_keys SET project_id = '11111111-1111-1111-1111-111111111111' WHERE project_id IS NULL;
 ALTER TABLE api_keys ALTER COLUMN project_id SET NOT NULL;
+CREATE INDEX idx_api_keys_project_id ON api_keys (project_id);
 
 -- Modify flag_events table
 ALTER TABLE flag_events ADD COLUMN project_id UUID REFERENCES projects(id);
