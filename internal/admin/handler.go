@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -197,6 +198,10 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if u, err := h.Repo.GetAdminUserByUsername(r.Context(), username); err == nil {
+			h.logAudit(r.Context(), u.ID, "admin_setup", "", "", map[string]string{"username": username})
+		}
+
 		http.Redirect(w, r, "/login", http.StatusFound)
 	}
 }
@@ -278,6 +283,8 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		h.SessionMgr.SetSessionCookie(w, token)
 
+		h.logAudit(r.Context(), user.ID, "admin_login", "", "", nil)
+
 		http.Redirect(w, r, "/", http.StatusFound)
 	}
 }
@@ -326,13 +333,22 @@ func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleProjects(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
+		session, ok := r.Context().Value(sessionContextKey).(repository.AdminSession)
+		if !ok {
+			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+
 		name := r.FormValue("name")
 		desc := r.FormValue("description")
 
-		if _, err := h.Repo.CreateProject(r.Context(), name, desc); err != nil {
+		p, err := h.Repo.CreateProject(r.Context(), name, desc)
+		if err != nil {
 			http.Error(w, "Failed to create project", http.StatusInternalServerError)
 			return
 		}
+
+		h.logAudit(r.Context(), session.AdminUserID, "project_create", p.ID, "", map[string]string{"name": name})
 
 		http.Redirect(w, r, "/", http.StatusFound)
 	}
@@ -443,6 +459,10 @@ func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *r
 			return
 		}
 
+		if session, ok := r.Context().Value(sessionContextKey).(repository.AdminSession); ok {
+			h.logAudit(r.Context(), session.AdminUserID, "flag_toggle", project.ID, flagKey, map[string]any{"enabled": repoFlag.Enabled})
+		}
+
 		// Render just the button if HTMX request
 		if r.Header.Get("HX-Request") == "true" {
 			colorClass := "bg-red-100 text-red-800"
@@ -509,4 +529,37 @@ func (h *Handler) validateDoubleSubmitCSRF(r *http.Request) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(formToken)) == 1
+}
+
+// logAudit writes an audit log entry on a best-effort basis.
+// Failures are logged but never propagated to the caller.
+func (h *Handler) logAudit(ctx context.Context, adminUserID, action, projectID, flagKey string, details any) {
+	entry, err := buildAuditEntry(adminUserID, action, projectID, flagKey, details)
+	if err != nil {
+		slog.Error("audit log: marshal details", "err", err)
+		return
+	}
+	if err := h.Repo.InsertAuditLog(ctx, entry); err != nil {
+		slog.Error("audit log", "err", err)
+	}
+}
+
+// buildAuditEntry constructs an AuditLogEntry, marshalling the details to JSON.
+func buildAuditEntry(adminUserID, action, projectID, flagKey string, details any) (repository.AuditLogEntry, error) {
+	var detailsJSON json.RawMessage
+	if details != nil {
+		b, err := json.Marshal(details)
+		if err != nil {
+			return repository.AuditLogEntry{}, err
+		}
+		detailsJSON = b
+	}
+	return repository.AuditLogEntry{
+		ProjectID:   projectID,
+		APIKeyID:    "",
+		AdminUserID: adminUserID,
+		Action:      action,
+		FlagKey:     flagKey,
+		Details:     detailsJSON,
+	}, nil
 }
