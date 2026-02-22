@@ -337,6 +337,50 @@ func TestHTTPHandlerStreamSendsSSEErrorAfterStartOnBackendFailure(t *testing.T) 
 	}
 }
 
+func TestHTTPHandlerListAuditLog(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	svc := &fakeService{
+		listAuditLogFunc: func(_ context.Context, projectID string, limit, offset int) ([]repository.AuditLogEntry, error) {
+			if projectID != "default" {
+				t.Fatalf("ListAuditLog projectID = %q, want %q", projectID, "default")
+			}
+			return []repository.AuditLogEntry{
+				{ID: 1, ProjectID: "default", Action: "create", FlagKey: "my-flag", CreatedAt: now},
+			}, nil
+		},
+	}
+
+	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
+	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/audit-log", nil))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var got []repository.AuditLogEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(got) != 1 || got[0].FlagKey != "my-flag" {
+		t.Fatalf("response = %#v, want single entry for my-flag", got)
+	}
+}
+
+func TestHTTPHandlerListAuditLogUnauthorized(t *testing.T) {
+	svc := &fakeService{}
+
+	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
+	req := httptest.NewRequest(http.MethodGet, "/v1/audit-log", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
 type fakeService struct {
 	createFlagFunc            func(ctx context.Context, flag repository.Flag) (repository.Flag, error)
 	updateFlagFunc            func(ctx context.Context, flag repository.Flag) (repository.Flag, error)
@@ -347,6 +391,7 @@ type fakeService struct {
 	resolveBatchFunc          func(ctx context.Context, requests []service.ResolveRequest) ([]service.ResolveResult, error)
 	listEventsSinceFunc       func(ctx context.Context, projectID string, eventID int64) ([]repository.FlagEvent, error)
 	listEventsSinceForKeyFunc func(ctx context.Context, projectID string, eventID int64, key string) ([]repository.FlagEvent, error)
+	listAuditLogFunc          func(ctx context.Context, projectID string, limit, offset int) ([]repository.AuditLogEntry, error)
 }
 
 func (f *fakeService) CreateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error) {
@@ -410,4 +455,11 @@ func (f *fakeService) ListEventsSinceForKey(ctx context.Context, projectID strin
 		return f.listEventsSinceForKeyFunc(ctx, projectID, eventID, key)
 	}
 	return nil, errors.New("ListEventsSinceForKey not implemented")
+}
+
+func (f *fakeService) ListAuditLog(ctx context.Context, projectID string, limit, offset int) ([]repository.AuditLogEntry, error) {
+	if f.listAuditLogFunc != nil {
+		return f.listAuditLogFunc(ctx, projectID, limit, offset)
+	}
+	return nil, errors.New("ListAuditLog not implemented")
 }

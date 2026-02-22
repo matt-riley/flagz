@@ -98,6 +98,7 @@ func NewHTTPHandlerWithOptions(svc Service, streamPollInterval time.Duration, m 
 	mux.HandleFunc("DELETE /v1/flags/{key}", server.handleDeleteFlag)
 	mux.HandleFunc("POST /v1/evaluate", server.handleEvaluate)
 	mux.HandleFunc("GET /v1/stream", server.handleStream)
+	mux.HandleFunc("GET /v1/audit-log", server.handleListAuditLog)
 	mux.HandleFunc("GET /healthz", server.handleHealthz)
 	mux.HandleFunc("GET /metrics", server.handleMetrics)
 
@@ -415,6 +416,35 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func (s *HTTPServer) handleListAuditLog(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := middleware.ProjectIDFromContext(r.Context())
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	limit := 50
+	offset := 0
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= 1000 {
+			limit = parsed
+		}
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	entries, err := s.service.ListAuditLog(r.Context(), projectID, limit, offset)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, entries)
 }
 
 func (s *HTTPServer) handleHealthz(w http.ResponseWriter, _ *http.Request) {

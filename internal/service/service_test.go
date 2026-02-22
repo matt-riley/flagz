@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/matt-riley/flagz/internal/core"
+	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 )
 
@@ -509,6 +510,89 @@ func TestServiceResolveBooleanUsesVariantsDefaultFallback(t *testing.T) {
 	}
 }
 
+func TestServiceAuditLogRecordedOnMutations(t *testing.T) {
+	ctx := middleware.NewContextWithProjectID(context.Background(), "proj1")
+	repo := newFakeServiceRepository()
+
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	flag := repository.Flag{
+		ProjectID:   "proj1",
+		Key:         "audit-flag",
+		Description: "test",
+		Enabled:     true,
+		Variants:    json.RawMessage(`{}`),
+		Rules:       json.RawMessage(`[]`),
+	}
+
+	if _, err := svc.CreateFlag(ctx, flag); err != nil {
+		t.Fatalf("CreateFlag() error = %v", err)
+	}
+
+	flag.Description = "updated"
+	if _, err := svc.UpdateFlag(ctx, flag); err != nil {
+		t.Fatalf("UpdateFlag() error = %v", err)
+	}
+
+	if err := svc.DeleteFlag(ctx, "proj1", "audit-flag"); err != nil {
+		t.Fatalf("DeleteFlag() error = %v", err)
+	}
+
+	// Give best-effort goroutines time to complete.
+	time.Sleep(100 * time.Millisecond)
+
+	repo.mu.RLock()
+	defer repo.mu.RUnlock()
+
+	if len(repo.auditLogs) != 3 {
+		t.Fatalf("audit log count = %d, want 3", len(repo.auditLogs))
+	}
+
+	wantActions := []string{"create", "update", "delete"}
+	for i, want := range wantActions {
+		if repo.auditLogs[i].Action != want {
+			t.Fatalf("audit log[%d].Action = %q, want %q", i, repo.auditLogs[i].Action, want)
+		}
+		if repo.auditLogs[i].ProjectID != "proj1" {
+			t.Fatalf("audit log[%d].ProjectID = %q, want %q", i, repo.auditLogs[i].ProjectID, "proj1")
+		}
+		if repo.auditLogs[i].FlagKey != "audit-flag" {
+			t.Fatalf("audit log[%d].FlagKey = %q, want %q", i, repo.auditLogs[i].FlagKey, "audit-flag")
+		}
+	}
+}
+
+func TestServiceMutationSucceedsWhenAuditLogFails(t *testing.T) {
+	ctx := middleware.NewContextWithProjectID(context.Background(), "proj1")
+	repo := newFakeServiceRepository()
+	repo.auditErr = errors.New("audit db down")
+
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	flag := repository.Flag{
+		ProjectID:   "proj1",
+		Key:         "audit-fail",
+		Description: "test",
+		Enabled:     true,
+		Variants:    json.RawMessage(`{}`),
+		Rules:       json.RawMessage(`[]`),
+	}
+
+	created, err := svc.CreateFlag(ctx, flag)
+	if err != nil {
+		t.Fatalf("CreateFlag() error = %v, want nil when audit fails", err)
+	}
+	if created.Key != flag.Key {
+		t.Fatalf("CreateFlag().Key = %q, want %q", created.Key, flag.Key)
+	}
+}
+
 func TestServiceResubscribesAfterInvalidationChannelClose(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -561,6 +645,9 @@ type fakeServiceRepository struct {
 	nextEventID int64
 	publishErr  error
 
+	auditLogs []repository.AuditLogEntry
+	auditErr  error
+
 	requirePublishActiveContext bool
 	publishCtxErr               error
 	publishCtxHasDeadline       bool
@@ -570,6 +657,35 @@ func newFakeServiceRepository() *fakeServiceRepository {
 	return &fakeServiceRepository{
 		flags: make(map[string]map[string]repository.Flag),
 	}
+}
+
+func (f *fakeServiceRepository) InsertAuditLog(_ context.Context, entry repository.AuditLogEntry) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.auditErr != nil {
+		return f.auditErr
+	}
+	f.auditLogs = append(f.auditLogs, entry)
+	return nil
+}
+
+func (f *fakeServiceRepository) ListAuditLog(_ context.Context, projectID string, limit, offset int) ([]repository.AuditLogEntry, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	var result []repository.AuditLogEntry
+	for _, e := range f.auditLogs {
+		if e.ProjectID == projectID {
+			result = append(result, e)
+		}
+	}
+	if offset > len(result) {
+		return nil, nil
+	}
+	result = result[offset:]
+	if limit > 0 && limit < len(result) {
+		result = result[:limit]
+	}
+	return result, nil
 }
 
 func (f *fakeServiceRepository) CreateFlag(_ context.Context, flag repository.Flag) (repository.Flag, error) {

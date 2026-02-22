@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/matt-riley/flagz/internal/core"
+	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 )
 
@@ -57,6 +58,8 @@ type Repository interface {
 	ListEventsSince(ctx context.Context, projectID string, eventID int64) ([]repository.FlagEvent, error)
 	ListEventsSinceForKey(ctx context.Context, projectID string, eventID int64, key string) ([]repository.FlagEvent, error)
 	PublishFlagEvent(ctx context.Context, event repository.FlagEvent) (repository.FlagEvent, error)
+	InsertAuditLog(ctx context.Context, entry repository.AuditLogEntry) error
+	ListAuditLog(ctx context.Context, projectID string, limit, offset int) ([]repository.AuditLogEntry, error)
 }
 
 type cacheInvalidationSubscriber interface {
@@ -210,6 +213,7 @@ func (s *Service) CreateFlag(ctx context.Context, flag repository.Flag) (reposit
 
 	s.setCachedFlag(created)
 	s.publishFlagEventBestEffort(ctx, EventTypeUpdated, created)
+	s.insertAuditLogBestEffort(ctx, "create", created.Key)
 
 	return created, nil
 }
@@ -242,6 +246,7 @@ func (s *Service) UpdateFlag(ctx context.Context, flag repository.Flag) (reposit
 
 	s.setCachedFlag(updated)
 	s.publishFlagEventBestEffort(ctx, EventTypeUpdated, updated)
+	s.insertAuditLogBestEffort(ctx, "update", updated.Key)
 
 	return updated, nil
 }
@@ -317,6 +322,7 @@ func (s *Service) DeleteFlag(ctx context.Context, projectID, key string) error {
 
 	s.deleteCachedFlag(projectID, key)
 	s.publishFlagEventBestEffort(ctx, EventTypeDeleted, existing)
+	s.insertAuditLogBestEffort(ctx, "delete", existing.Key)
 
 	return nil
 }
@@ -579,4 +585,25 @@ func parseBooleanDefaultFromVariants(payload json.RawMessage) *bool {
 	}
 
 	return &defaultValue
+}
+
+// ListAuditLog returns audit log entries for a project.
+func (s *Service) ListAuditLog(ctx context.Context, projectID string, limit, offset int) ([]repository.AuditLogEntry, error) {
+	if strings.TrimSpace(projectID) == "" {
+		return nil, ErrProjectIDRequired
+	}
+	return s.repo.ListAuditLog(ctx, projectID, limit, offset)
+}
+
+func (s *Service) insertAuditLogBestEffort(ctx context.Context, action, flagKey string) {
+	projectID, _ := middleware.ProjectIDFromContext(ctx)
+	apiKeyID, _ := middleware.APIKeyIDFromContext(ctx)
+	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), bestEffortTimeout)
+	defer cancel()
+	_ = s.repo.InsertAuditLog(bgCtx, repository.AuditLogEntry{
+		ProjectID: projectID,
+		APIKeyID:  apiKeyID,
+		Action:    action,
+		FlagKey:   flagKey,
+	})
 }
