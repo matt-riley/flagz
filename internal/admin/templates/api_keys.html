@@ -60,7 +60,11 @@
                 </tr>
                 {{else}}
                 <tr>
+                    {{if eq $.User.Role "admin"}}
                     <td colspan="3" class="px-5 py-5 border-b border-gray-200 bg-white text-sm text-center">No API keys found.</td>
+                    {{else}}
+                    <td colspan="2" class="px-5 py-5 border-b border-gray-200 bg-white text-sm text-center">No API keys found.</td>
+                    {{end}}
                 </tr>
                 {{end}}
             </tbody>
