@@ -1,5 +1,21 @@
 //go:build integration
 
+// Integration tests
+//
+// These tests are excluded from the default `go test ./...` run because they
+// are guarded by the `integration` build tag and rely on real Docker
+// containers via testcontainers-go.
+//
+// To run the integration test suite locally:
+//
+//	go test -tags=integration ./internal/integration/...
+//
+// Prerequisites:
+//   - Docker (or a compatible container runtime) available on the host
+//   - Network access to pull the `postgres:18-alpine` image (on first run)
+//
+// The tests will automatically start and tear down a temporary Postgres
+// container and run database migrations from the `migrations/` directory.
 package integration
 
 import (
