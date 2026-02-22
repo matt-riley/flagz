@@ -105,7 +105,7 @@ func TestNewHTTPHandlerKeepsPublicEndpointsAccessible(t *testing.T) {
 func TestAPIKeyTokenValidatorValidateToken(t *testing.T) {
 	t.Run("nil validator", func(t *testing.T) {
 		var validator *apiKeyTokenValidator
-		err := validator.ValidateToken(context.Background(), "key.secret")
+		_, err := validator.ValidateToken(context.Background(), "key.secret")
 		if err == nil || err.Error() != "api key validator is nil" {
 			t.Fatalf("ValidateToken() error = %v, want api key validator is nil", err)
 		}
@@ -124,7 +124,7 @@ func TestAPIKeyTokenValidatorValidateToken(t *testing.T) {
 		for _, token := range tests {
 			token := token
 			t.Run(token, func(t *testing.T) {
-				err := validator.ValidateToken(context.Background(), token)
+				_, err := validator.ValidateToken(context.Background(), token)
 				if err == nil || err.Error() != "invalid token format" {
 					t.Fatalf("ValidateToken(%q) error = %v, want invalid token format", token, err)
 				}
@@ -142,7 +142,7 @@ func TestAPIKeyTokenValidatorValidateToken(t *testing.T) {
 			lookup: &fakeAPIKeyHashLookup{err: lookupErr},
 		}
 
-		err := validator.ValidateToken(context.Background(), "key.secret")
+		_, err := validator.ValidateToken(context.Background(), "key.secret")
 		if err == nil || !strings.Contains(err.Error(), "lookup key hash") {
 			t.Fatalf("ValidateToken() error = %v, want wrapped lookup error", err)
 		}
@@ -157,7 +157,7 @@ func TestAPIKeyTokenValidatorValidateToken(t *testing.T) {
 		}
 		validator := &apiKeyTokenValidator{lookup: lookup}
 
-		err := validator.ValidateToken(context.Background(), "key.bad-secret")
+		_, err := validator.ValidateToken(context.Background(), "key.bad-secret")
 		if err == nil || err.Error() != "invalid token" {
 			t.Fatalf("ValidateToken() error = %v, want invalid token", err)
 		}
@@ -168,13 +168,17 @@ func TestAPIKeyTokenValidatorValidateToken(t *testing.T) {
 
 	t.Run("valid token", func(t *testing.T) {
 		lookup := &fakeAPIKeyHashLookup{
-			hash: mustHashAPIKey(t, "good-secret"),
+			hash:      mustHashAPIKey(t, "good-secret"),
+			projectID: "proj-123",
 		}
 		validator := &apiKeyTokenValidator{lookup: lookup}
 
-		err := validator.ValidateToken(context.Background(), "my-key.good-secret")
+		pid, err := validator.ValidateToken(context.Background(), "my-key.good-secret")
 		if err != nil {
 			t.Fatalf("ValidateToken() error = %v, want nil", err)
+		}
+		if pid != "proj-123" {
+			t.Fatalf("ValidateToken() projectID = %q, want proj-123", pid)
 		}
 		if lookup.gotID != "my-key" {
 			t.Fatalf("ValidateAPIKey id = %q, want %q", lookup.gotID, "my-key")
@@ -183,27 +187,29 @@ func TestAPIKeyTokenValidatorValidateToken(t *testing.T) {
 }
 
 type fakeAPIKeyHashLookup struct {
-	hash  string
-	err   error
-	calls int
-	gotID string
+	hash      string
+	projectID string
+	err       error
+	calls     int
+	gotID     string
 }
 
 type fakeHTTPTokenValidator struct {
-	err   error
-	calls int
+	err       error
+	calls     int
+	projectID string
 }
 
-func (f *fakeAPIKeyHashLookup) ValidateAPIKey(_ context.Context, id string) (string, error) {
+func (f *fakeAPIKeyHashLookup) ValidateAPIKey(_ context.Context, id string) (string, string, error) {
 	f.calls++
 	f.gotID = id
 	if f.err != nil {
-		return "", f.err
+		return "", "", f.err
 	}
-	return f.hash, nil
+	return f.hash, f.projectID, nil
 }
 
-func (f *fakeHTTPTokenValidator) ValidateToken(_ context.Context, _ string) error {
+func (f *fakeHTTPTokenValidator) ValidateToken(_ context.Context, _ string) (string, error) {
 	f.calls++
-	return f.err
+	return f.projectID, f.err
 }

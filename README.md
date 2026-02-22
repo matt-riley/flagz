@@ -163,8 +163,30 @@ All configuration is via environment variables.
 | `HTTP_ADDR`            |          | `:8080` | Address for the HTTP server                         |
 | `GRPC_ADDR`            |          | `:9090` | Address for the gRPC server                         |
 | `STREAM_POLL_INTERVAL` |          | `1s`    | How often streams poll for new events (must be > 0) |
+| `ADMIN_HOSTNAME`       |          | —       | Hostname for the Admin Portal on Tailscale          |
+| `TS_AUTH_KEY`          |          | —       | Tailscale Auth Key (required if ADMIN_HOSTNAME set) |
+| `TS_STATE_DIR`         |          | `./ts-state` | Directory to store Tailscale state             |
+| `SESSION_SECRET`       |          | —       | Secret for signing admin sessions (32+ chars)       |
 
 `STREAM_POLL_INTERVAL` accepts any Go duration string: `500ms`, `2s`, `1m`, etc.
+
+---
+
+## Admin Portal
+
+flagz includes a built-in Admin Portal for managing projects and flags. It is designed to be accessible **only** via a Tailscale network (tailnet) for security.
+
+To enable the Admin Portal:
+
+1.  Set `ADMIN_HOSTNAME` to the desired hostname (e.g., `flagz-admin`).
+2.  Set `TS_AUTH_KEY` to a valid Tailscale Auth Key (reusable, ephemeral recommended).
+3.  Set `SESSION_SECRET` to a random string (at least 32 bytes) for secure session cookies.
+
+The portal will start and register itself on your tailnet. Access it at `http://<ADMIN_HOSTNAME>` from any device on your tailnet.
+
+### First-run setup
+
+The first time you access the portal, you will be redirected to a setup page to create the initial admin user. Subsequent accesses will require login.
 
 ---
 

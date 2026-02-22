@@ -1,19 +1,20 @@
 package server
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"strconv"
-	"strings"
-	"time"
+"context"
+"encoding/json"
+"errors"
+"strconv"
+"strings"
+"time"
 
-	flagspb "github.com/matt-riley/flagz/api/proto/v1"
-	"github.com/matt-riley/flagz/internal/core"
-	"github.com/matt-riley/flagz/internal/repository"
-	"github.com/matt-riley/flagz/internal/service"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+flagspb "github.com/matt-riley/flagz/api/proto/v1"
+"github.com/matt-riley/flagz/internal/core"
+"github.com/matt-riley/flagz/internal/middleware"
+"github.com/matt-riley/flagz/internal/repository"
+"github.com/matt-riley/flagz/internal/service"
+"google.golang.org/grpc/codes"
+"google.golang.org/grpc/status"
 )
 
 const defaultGRPCStreamPollInterval = time.Second
@@ -21,370 +22,420 @@ const defaultGRPCStreamPollInterval = time.Second
 // GRPCServer implements the FlagService gRPC interface, providing flag CRUD,
 // boolean evaluation, batch resolution, and server-streaming watch.
 type GRPCServer struct {
-	flagspb.UnimplementedFlagServiceServer
-	service            Service
-	streamPollInterval time.Duration
+flagspb.UnimplementedFlagServiceServer
+service            Service
+streamPollInterval time.Duration
 }
 
 // NewGRPCServer creates a [GRPCServer] with a default stream poll interval of
 // 1 second.
 func NewGRPCServer(svc Service) *GRPCServer {
-	return NewGRPCServerWithStreamPollInterval(svc, defaultGRPCStreamPollInterval)
+return NewGRPCServerWithStreamPollInterval(svc, defaultGRPCStreamPollInterval)
 }
 
 // NewGRPCServerWithStreamPollInterval creates a [GRPCServer] with the specified
 // poll interval for the WatchFlag streaming RPC.
 func NewGRPCServerWithStreamPollInterval(svc Service, streamPollInterval time.Duration) *GRPCServer {
-	if svc == nil {
-		panic("service is nil")
-	}
+if svc == nil {
+panic("service is nil")
+}
 
-	if streamPollInterval <= 0 {
-		streamPollInterval = defaultGRPCStreamPollInterval
-	}
+if streamPollInterval <= 0 {
+streamPollInterval = defaultGRPCStreamPollInterval
+}
 
-	return &GRPCServer{
-		service:            svc,
-		streamPollInterval: streamPollInterval,
-	}
+return &GRPCServer{
+service:            svc,
+streamPollInterval: streamPollInterval,
+}
 }
 
 func (s *GRPCServer) CreateFlag(ctx context.Context, req *flagspb.CreateFlagRequest) (*flagspb.CreateFlagResponse, error) {
-	if req == nil || req.GetFlag() == nil {
-		return nil, status.Error(codes.InvalidArgument, "flag is required")
-	}
-	if strings.TrimSpace(req.GetFlag().GetKey()) == "" {
-		return nil, status.Error(codes.InvalidArgument, "key is required")
-	}
+projectID, ok := middleware.ProjectIDFromContext(ctx)
+if !ok {
+return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+}
 
-	created, err := s.service.CreateFlag(ctx, protoFlagToRepository(req.GetFlag()))
-	if err != nil {
-		return nil, toGRPCError(err)
-	}
+if req == nil || req.GetFlag() == nil {
+return nil, status.Error(codes.InvalidArgument, "flag is required")
+}
+if strings.TrimSpace(req.GetFlag().GetKey()) == "" {
+return nil, status.Error(codes.InvalidArgument, "key is required")
+}
 
-	return &flagspb.CreateFlagResponse{Flag: repositoryFlagToProto(created)}, nil
+flag := protoFlagToRepository(req.GetFlag())
+flag.ProjectID = projectID
+
+created, err := s.service.CreateFlag(ctx, flag)
+if err != nil {
+return nil, toGRPCError(err)
+}
+
+return &flagspb.CreateFlagResponse{Flag: repositoryFlagToProto(created)}, nil
 }
 
 func (s *GRPCServer) UpdateFlag(ctx context.Context, req *flagspb.UpdateFlagRequest) (*flagspb.UpdateFlagResponse, error) {
-	if req == nil || req.GetFlag() == nil {
-		return nil, status.Error(codes.InvalidArgument, "flag is required")
-	}
-	if strings.TrimSpace(req.GetFlag().GetKey()) == "" {
-		return nil, status.Error(codes.InvalidArgument, "key is required")
-	}
+projectID, ok := middleware.ProjectIDFromContext(ctx)
+if !ok {
+return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+}
 
-	updated, err := s.service.UpdateFlag(ctx, protoFlagToRepository(req.GetFlag()))
-	if err != nil {
-		return nil, toGRPCError(err)
-	}
+if req == nil || req.GetFlag() == nil {
+return nil, status.Error(codes.InvalidArgument, "flag is required")
+}
+if strings.TrimSpace(req.GetFlag().GetKey()) == "" {
+return nil, status.Error(codes.InvalidArgument, "key is required")
+}
 
-	return &flagspb.UpdateFlagResponse{Flag: repositoryFlagToProto(updated)}, nil
+flag := protoFlagToRepository(req.GetFlag())
+flag.ProjectID = projectID
+
+updated, err := s.service.UpdateFlag(ctx, flag)
+if err != nil {
+return nil, toGRPCError(err)
+}
+
+return &flagspb.UpdateFlagResponse{Flag: repositoryFlagToProto(updated)}, nil
 }
 
 func (s *GRPCServer) GetFlag(ctx context.Context, req *flagspb.GetFlagRequest) (*flagspb.GetFlagResponse, error) {
-	if req == nil || strings.TrimSpace(req.GetKey()) == "" {
-		return nil, status.Error(codes.InvalidArgument, "key is required")
-	}
+projectID, ok := middleware.ProjectIDFromContext(ctx)
+if !ok {
+return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+}
 
-	flag, err := s.service.GetFlag(ctx, req.GetKey())
-	if err != nil {
-		return nil, toGRPCError(err)
-	}
+if req == nil || strings.TrimSpace(req.GetKey()) == "" {
+return nil, status.Error(codes.InvalidArgument, "key is required")
+}
 
-	return &flagspb.GetFlagResponse{Flag: repositoryFlagToProto(flag)}, nil
+flag, err := s.service.GetFlag(ctx, projectID, req.GetKey())
+if err != nil {
+return nil, toGRPCError(err)
+}
+
+return &flagspb.GetFlagResponse{Flag: repositoryFlagToProto(flag)}, nil
 }
 
 func (s *GRPCServer) ListFlags(ctx context.Context, req *flagspb.ListFlagsRequest) (*flagspb.ListFlagsResponse, error) {
-	flags, err := s.service.ListFlags(ctx)
-	if err != nil {
-		return nil, toGRPCError(err)
-	}
+projectID, ok := middleware.ProjectIDFromContext(ctx)
+if !ok {
+return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+}
 
-	pageSize := 0
-	pageToken := ""
-	if req != nil {
-		pageSize = int(req.GetPageSize())
-		pageToken = req.GetPageToken()
-	}
-	if pageSize < 0 {
-		return nil, status.Error(codes.InvalidArgument, "page_size must be non-negative")
-	}
+flags, err := s.service.ListFlags(ctx, projectID)
+if err != nil {
+return nil, toGRPCError(err)
+}
 
-	pageStart, err := parseListPageToken(pageToken, len(flags))
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, "invalid page_token")
-	}
+pageSize := 0
+pageToken := ""
+if req != nil {
+pageSize = int(req.GetPageSize())
+pageToken = req.GetPageToken()
+}
+if pageSize < 0 {
+return nil, status.Error(codes.InvalidArgument, "page_size must be non-negative")
+}
 
-	pageEnd := len(flags)
-	nextPageToken := ""
-	if pageSize > 0 {
-		pageEnd = pageStart + pageSize
-		if pageEnd > len(flags) {
-			pageEnd = len(flags)
-		}
-		if pageEnd < len(flags) {
-			nextPageToken = strconv.Itoa(pageEnd)
-		}
-	}
+pageStart, err := parseListPageToken(pageToken, len(flags))
+if err != nil {
+return nil, status.Error(codes.InvalidArgument, "invalid page_token")
+}
 
-	flags = flags[pageStart:pageEnd]
+pageEnd := len(flags)
+nextPageToken := ""
+if pageSize > 0 {
+pageEnd = pageStart + pageSize
+if pageEnd > len(flags) {
+pageEnd = len(flags)
+}
+if pageEnd < len(flags) {
+nextPageToken = strconv.Itoa(pageEnd)
+}
+}
 
-	protoFlags := make([]*flagspb.Flag, 0, len(flags))
-	for _, flag := range flags {
-		protoFlags = append(protoFlags, repositoryFlagToProto(flag))
-	}
+flags = flags[pageStart:pageEnd]
 
-	return &flagspb.ListFlagsResponse{
-		Flags:         protoFlags,
-		NextPageToken: nextPageToken,
-	}, nil
+protoFlags := make([]*flagspb.Flag, 0, len(flags))
+for _, flag := range flags {
+protoFlags = append(protoFlags, repositoryFlagToProto(flag))
+}
+
+return &flagspb.ListFlagsResponse{
+Flags:         protoFlags,
+NextPageToken: nextPageToken,
+}, nil
 }
 
 func (s *GRPCServer) DeleteFlag(ctx context.Context, req *flagspb.DeleteFlagRequest) (*flagspb.DeleteFlagResponse, error) {
-	if req == nil || strings.TrimSpace(req.GetKey()) == "" {
-		return nil, status.Error(codes.InvalidArgument, "key is required")
-	}
+projectID, ok := middleware.ProjectIDFromContext(ctx)
+if !ok {
+return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+}
 
-	if err := s.service.DeleteFlag(ctx, req.GetKey()); err != nil {
-		return nil, toGRPCError(err)
-	}
+if req == nil || strings.TrimSpace(req.GetKey()) == "" {
+return nil, status.Error(codes.InvalidArgument, "key is required")
+}
 
-	return &flagspb.DeleteFlagResponse{}, nil
+if err := s.service.DeleteFlag(ctx, projectID, req.GetKey()); err != nil {
+return nil, toGRPCError(err)
+}
+
+return &flagspb.DeleteFlagResponse{}, nil
 }
 
 func (s *GRPCServer) ResolveBoolean(ctx context.Context, req *flagspb.ResolveBooleanRequest) (*flagspb.ResolveBooleanResponse, error) {
-	if req == nil || strings.TrimSpace(req.GetKey()) == "" {
-		return nil, status.Error(codes.InvalidArgument, "key is required")
-	}
+projectID, ok := middleware.ProjectIDFromContext(ctx)
+if !ok {
+return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+}
 
-	evalContext, err := decodeEvaluationContext(req.GetContextJson())
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, "invalid context_json")
-	}
+if req == nil || strings.TrimSpace(req.GetKey()) == "" {
+return nil, status.Error(codes.InvalidArgument, "key is required")
+}
 
-	value, err := s.service.ResolveBoolean(ctx, req.GetKey(), evalContext, req.GetDefaultValue())
-	if err != nil {
-		return nil, toGRPCError(err)
-	}
+evalContext, err := decodeEvaluationContext(req.GetContextJson())
+if err != nil {
+return nil, status.Error(codes.InvalidArgument, "invalid context_json")
+}
 
-	return &flagspb.ResolveBooleanResponse{
-		Key:   req.GetKey(),
-		Value: value,
-	}, nil
+value, err := s.service.ResolveBoolean(ctx, projectID, req.GetKey(), evalContext, req.GetDefaultValue())
+if err != nil {
+return nil, toGRPCError(err)
+}
+
+return &flagspb.ResolveBooleanResponse{
+Key:   req.GetKey(),
+Value: value,
+}, nil
 }
 
 func (s *GRPCServer) ResolveBatch(ctx context.Context, req *flagspb.ResolveBatchRequest) (*flagspb.ResolveBatchResponse, error) {
-	if req == nil || len(req.GetRequests()) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "requests are required")
-	}
+projectID, ok := middleware.ProjectIDFromContext(ctx)
+if !ok {
+return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+}
 
-	requests := make([]service.ResolveRequest, 0, len(req.GetRequests()))
-	for idx, request := range req.GetRequests() {
-		if strings.TrimSpace(request.GetKey()) == "" {
-			return nil, status.Errorf(codes.InvalidArgument, "requests[%d].key is required", idx)
-		}
+if req == nil || len(req.GetRequests()) == 0 {
+return nil, status.Error(codes.InvalidArgument, "requests are required")
+}
 
-		evalContext, err := decodeEvaluationContext(request.GetContextJson())
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "requests[%d].context_json is invalid", idx)
-		}
+requests := make([]service.ResolveRequest, 0, len(req.GetRequests()))
+for idx, request := range req.GetRequests() {
+if strings.TrimSpace(request.GetKey()) == "" {
+return nil, status.Errorf(codes.InvalidArgument, "requests[%d].key is required", idx)
+}
 
-		requests = append(requests, service.ResolveRequest{
-			Key:          request.GetKey(),
-			Context:      evalContext,
-			DefaultValue: request.GetDefaultValue(),
-		})
-	}
+evalContext, err := decodeEvaluationContext(request.GetContextJson())
+if err != nil {
+return nil, status.Errorf(codes.InvalidArgument, "requests[%d].context_json is invalid", idx)
+}
 
-	results, err := s.service.ResolveBatch(ctx, requests)
-	if err != nil {
-		return nil, toGRPCError(err)
-	}
+requests = append(requests, service.ResolveRequest{
+ProjectID:    projectID,
+Key:          request.GetKey(),
+Context:      evalContext,
+DefaultValue: request.GetDefaultValue(),
+})
+}
 
-	protoResults := make([]*flagspb.ResolveBatchResult, 0, len(results))
-	for _, result := range results {
-		protoResults = append(protoResults, &flagspb.ResolveBatchResult{
-			Key:   result.Key,
-			Value: result.Value,
-		})
-	}
+results, err := s.service.ResolveBatch(ctx, requests)
+if err != nil {
+return nil, toGRPCError(err)
+}
 
-	return &flagspb.ResolveBatchResponse{Results: protoResults}, nil
+protoResults := make([]*flagspb.ResolveBatchResult, 0, len(results))
+for _, result := range results {
+protoResults = append(protoResults, &flagspb.ResolveBatchResult{
+Key:   result.Key,
+Value: result.Value,
+})
+}
+
+return &flagspb.ResolveBatchResponse{Results: protoResults}, nil
 }
 
 func (s *GRPCServer) WatchFlag(req *flagspb.WatchFlagRequest, stream flagspb.FlagService_WatchFlagServer) error {
-	filterKey := ""
-	var lastEventID int64
-	if req != nil {
-		filterKey = strings.TrimSpace(req.GetKey())
-		lastEventID = req.GetLastEventId()
-	}
-	if lastEventID < 0 {
-		return status.Error(codes.InvalidArgument, "last_event_id must be non-negative")
-	}
+projectID, ok := middleware.ProjectIDFromContext(stream.Context())
+if !ok {
+return status.Error(codes.Unauthenticated, "unauthenticated")
+}
 
-	listEventsSince := s.service.ListEventsSince
-	if filterKey != "" {
-		listEventsSince = func(ctx context.Context, eventID int64) ([]repository.FlagEvent, error) {
-			return s.service.ListEventsSinceForKey(ctx, eventID, filterKey)
-		}
-	}
+filterKey := ""
+var lastEventID int64
+if req != nil {
+filterKey = strings.TrimSpace(req.GetKey())
+lastEventID = req.GetLastEventId()
+}
+if lastEventID < 0 {
+return status.Error(codes.InvalidArgument, "last_event_id must be non-negative")
+}
 
-	sendEvents := func(ctx context.Context) error {
-		events, err := listEventsSince(ctx, lastEventID)
-		if err != nil {
-			return toGRPCError(err)
-		}
+listEventsSince := func(ctx context.Context, eventID int64) ([]repository.FlagEvent, error) {
+return s.service.ListEventsSince(ctx, projectID, eventID)
+}
 
-		for _, event := range events {
-			lastEventID = event.EventID
-			watchEvent, ok := repositoryEventToProto(event)
-			if !ok {
-				continue
-			}
+if filterKey != "" {
+listEventsSince = func(ctx context.Context, eventID int64) ([]repository.FlagEvent, error) {
+return s.service.ListEventsSinceForKey(ctx, projectID, eventID, filterKey)
+}
+}
 
-			if err := stream.Send(watchEvent); err != nil {
-				return err
-			}
-		}
+sendEvents := func(ctx context.Context) error {
+events, err := listEventsSince(ctx, lastEventID)
+if err != nil {
+return toGRPCError(err)
+}
 
-		return nil
-	}
+for _, event := range events {
+lastEventID = event.EventID
+watchEvent, ok := repositoryEventToProto(event)
+if !ok {
+continue
+}
 
-	if err := sendEvents(stream.Context()); err != nil {
-		return err
-	}
+if err := stream.Send(watchEvent); err != nil {
+return err
+}
+}
 
-	ticker := time.NewTicker(s.streamPollInterval)
-	defer ticker.Stop()
+return nil
+}
 
-	for {
-		select {
-		case <-stream.Context().Done():
-			return nil
-		case <-ticker.C:
-			if err := sendEvents(stream.Context()); err != nil {
-				return err
-			}
-		}
-	}
+if err := sendEvents(stream.Context()); err != nil {
+return err
+}
+
+ticker := time.NewTicker(s.streamPollInterval)
+defer ticker.Stop()
+
+for {
+select {
+case <-stream.Context().Done():
+return nil
+case <-ticker.C:
+if err := sendEvents(stream.Context()); err != nil {
+return err
+}
+}
+}
 }
 
 func toGRPCError(err error) error {
-	if err == nil {
-		return nil
-	}
+if err == nil {
+return nil
+}
 
-	if _, ok := status.FromError(err); ok {
-		return err
-	}
+if _, ok := status.FromError(err); ok {
+return err
+}
 
-	switch {
-	case errors.Is(err, service.ErrInvalidRules):
-		return status.Error(codes.InvalidArgument, "invalid rules")
-	case errors.Is(err, service.ErrInvalidVariants):
-		return status.Error(codes.InvalidArgument, "invalid variants")
-	case isInvalidArgumentError(err):
-		return status.Error(codes.InvalidArgument, err.Error())
-	case errors.Is(err, service.ErrFlagNotFound):
-		return status.Error(codes.NotFound, "flag not found")
-	case errors.Is(err, context.Canceled):
-		return status.Error(codes.Canceled, "request canceled")
-	case errors.Is(err, context.DeadlineExceeded):
-		return status.Error(codes.DeadlineExceeded, "deadline exceeded")
-	default:
-		return status.Error(codes.Internal, "internal server error")
-	}
+switch {
+case errors.Is(err, service.ErrInvalidRules):
+return status.Error(codes.InvalidArgument, "invalid rules")
+case errors.Is(err, service.ErrInvalidVariants):
+return status.Error(codes.InvalidArgument, "invalid variants")
+case isInvalidArgumentError(err):
+return status.Error(codes.InvalidArgument, err.Error())
+case errors.Is(err, service.ErrFlagNotFound):
+return status.Error(codes.NotFound, "flag not found")
+case errors.Is(err, context.Canceled):
+return status.Error(codes.Canceled, "request canceled")
+case errors.Is(err, context.DeadlineExceeded):
+return status.Error(codes.DeadlineExceeded, "deadline exceeded")
+default:
+return status.Error(codes.Internal, "internal server error")
+}
 }
 
 func isInvalidArgumentError(err error) bool {
-	if err == nil {
-		return false
-	}
+if err == nil {
+return false
+}
 
-	return strings.EqualFold(strings.TrimSpace(err.Error()), "flag key is required")
+return strings.EqualFold(strings.TrimSpace(err.Error()), "flag key is required")
 }
 
 func parseListPageToken(pageToken string, maxOffset int) (int, error) {
-	pageToken = strings.TrimSpace(pageToken)
-	if pageToken == "" {
-		return 0, nil
-	}
+pageToken = strings.TrimSpace(pageToken)
+if pageToken == "" {
+return 0, nil
+}
 
-	offset, err := strconv.Atoi(pageToken)
-	if err != nil || offset < 0 || offset > maxOffset {
-		return 0, errors.New("invalid page token")
-	}
+offset, err := strconv.Atoi(pageToken)
+if err != nil || offset < 0 || offset > maxOffset {
+return 0, errors.New("invalid page token")
+}
 
-	return offset, nil
+return offset, nil
 }
 
 func protoFlagToRepository(flag *flagspb.Flag) repository.Flag {
-	if flag == nil {
-		return repository.Flag{}
-	}
+if flag == nil {
+return repository.Flag{}
+}
 
-	return repository.Flag{
-		Key:         flag.GetKey(),
-		Description: flag.GetDescription(),
-		Enabled:     flag.GetEnabled(),
-		Variants:    append(json.RawMessage(nil), flag.GetVariantsJson()...),
-		Rules:       append(json.RawMessage(nil), flag.GetRulesJson()...),
-	}
+return repository.Flag{
+Key:         flag.GetKey(),
+Description: flag.GetDescription(),
+Enabled:     flag.GetEnabled(),
+Variants:    append(json.RawMessage(nil), flag.GetVariantsJson()...),
+Rules:       append(json.RawMessage(nil), flag.GetRulesJson()...),
+}
 }
 
 func repositoryFlagToProto(flag repository.Flag) *flagspb.Flag {
-	return &flagspb.Flag{
-		Key:          flag.Key,
-		Description:  flag.Description,
-		Enabled:      flag.Enabled,
-		VariantsJson: append([]byte(nil), flag.Variants...),
-		RulesJson:    append([]byte(nil), flag.Rules...),
-	}
+return &flagspb.Flag{
+Key:          flag.Key,
+Description:  flag.Description,
+Enabled:      flag.Enabled,
+VariantsJson: append([]byte(nil), flag.Variants...),
+RulesJson:    append([]byte(nil), flag.Rules...),
+}
 }
 
 func decodeEvaluationContext(payload []byte) (core.EvaluationContext, error) {
-	if len(payload) == 0 {
-		return core.EvaluationContext{}, nil
-	}
+if len(payload) == 0 {
+return core.EvaluationContext{}, nil
+}
 
-	var evalContext core.EvaluationContext
-	if err := json.Unmarshal(payload, &evalContext); err != nil {
-		return core.EvaluationContext{}, err
-	}
+var evalContext core.EvaluationContext
+if err := json.Unmarshal(payload, &evalContext); err != nil {
+return core.EvaluationContext{}, err
+}
 
-	return evalContext, nil
+return evalContext, nil
 }
 
 func repositoryEventToProto(event repository.FlagEvent) (*flagspb.WatchFlagEvent, bool) {
-	watchEventType, ok := toProtoWatchEventType(event.EventType)
-	if !ok {
-		return nil, false
-	}
+watchEventType, ok := toProtoWatchEventType(event.EventType)
+if !ok {
+return nil, false
+}
 
-	watchEvent := &flagspb.WatchFlagEvent{
-		Type:    watchEventType,
-		Key:     event.FlagKey,
-		EventId: event.EventID,
-	}
+watchEvent := &flagspb.WatchFlagEvent{
+Type:    watchEventType,
+Key:     event.FlagKey,
+EventId: event.EventID,
+}
 
-	if len(event.Payload) > 0 {
-		var flag repository.Flag
-		if err := json.Unmarshal(event.Payload, &flag); err == nil && strings.TrimSpace(flag.Key) != "" {
-			watchEvent.Flag = repositoryFlagToProto(flag)
-		}
-	}
+if len(event.Payload) > 0 {
+var flag repository.Flag
+if err := json.Unmarshal(event.Payload, &flag); err == nil && strings.TrimSpace(flag.Key) != "" {
+watchEvent.Flag = repositoryFlagToProto(flag)
+}
+}
 
-	return watchEvent, true
+return watchEvent, true
 }
 
 func toProtoWatchEventType(eventType string) (flagspb.WatchFlagEventType, bool) {
-	switch strings.ToLower(strings.TrimSpace(eventType)) {
-	case "update", "updated":
-		return flagspb.WatchFlagEventType_FLAG_UPDATED, true
-	case "delete", "deleted":
-		return flagspb.WatchFlagEventType_FLAG_DELETED, true
-	default:
-		return flagspb.WatchFlagEventType_WATCH_FLAG_EVENT_TYPE_UNSPECIFIED, false
-	}
+switch strings.ToLower(strings.TrimSpace(eventType)) {
+case "update", "updated":
+return flagspb.WatchFlagEventType_FLAG_UPDATED, true
+case "delete", "deleted":
+return flagspb.WatchFlagEventType_FLAG_DELETED, true
+default:
+return flagspb.WatchFlagEventType_WATCH_FLAG_EVENT_TYPE_UNSPECIFIED, false
+}
 }

@@ -46,11 +46,11 @@ var (
 type Repository interface {
 	CreateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error)
 	UpdateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error)
-	GetFlag(ctx context.Context, key string) (repository.Flag, error)
+	GetFlag(ctx context.Context, projectID, key string) (repository.Flag, error)
 	ListFlags(ctx context.Context) ([]repository.Flag, error)
-	DeleteFlag(ctx context.Context, key string) error
-	ListEventsSince(ctx context.Context, eventID int64) ([]repository.FlagEvent, error)
-	ListEventsSinceForKey(ctx context.Context, eventID int64, key string) ([]repository.FlagEvent, error)
+	DeleteFlag(ctx context.Context, projectID, key string) error
+	ListEventsSince(ctx context.Context, projectID string, eventID int64) ([]repository.FlagEvent, error)
+	ListEventsSinceForKey(ctx context.Context, projectID string, eventID int64, key string) ([]repository.FlagEvent, error)
 	PublishFlagEvent(ctx context.Context, event repository.FlagEvent) (repository.FlagEvent, error)
 }
 
@@ -61,6 +61,7 @@ type cacheInvalidationSubscriber interface {
 // ResolveRequest represents a single flag evaluation request, pairing a flag
 // key with an evaluation context and a default value to fall back on.
 type ResolveRequest struct {
+	ProjectID    string
 	Key          string
 	Context      core.EvaluationContext
 	DefaultValue bool
@@ -78,7 +79,7 @@ type ResolveResult struct {
 type Service struct {
 	repo  Repository
 	mu    sync.RWMutex
-	cache map[string]repository.Flag
+	cache map[string]map[string]repository.Flag // map[projectID]map[key]Flag
 }
 
 // New creates a [Service], eagerly loading the flag cache from the repository.
@@ -91,7 +92,7 @@ func New(ctx context.Context, repo Repository) (*Service, error) {
 
 	svc := &Service{
 		repo:  repo,
-		cache: make(map[string]repository.Flag),
+		cache: make(map[string]map[string]repository.Flag),
 	}
 
 	if err := svc.LoadCache(ctx); err != nil {
@@ -115,9 +116,12 @@ func (s *Service) LoadCache(ctx context.Context) error {
 		return fmt.Errorf("load flags: %w", err)
 	}
 
-	next := make(map[string]repository.Flag, len(flags))
+	next := make(map[string]map[string]repository.Flag)
 	for _, flag := range flags {
-		next[flag.Key] = flag
+		if _, ok := next[flag.ProjectID]; !ok {
+			next[flag.ProjectID] = make(map[string]repository.Flag)
+		}
+		next[flag.ProjectID][flag.Key] = flag
 	}
 
 	s.mu.Lock()
@@ -132,6 +136,9 @@ func (s *Service) LoadCache(ctx context.Context) error {
 func (s *Service) CreateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error) {
 	if strings.TrimSpace(flag.Key) == "" {
 		return repository.Flag{}, errors.New("flag key is required")
+	}
+	if strings.TrimSpace(flag.ProjectID) == "" {
+		return repository.Flag{}, errors.New("project ID is required")
 	}
 	if _, err := parseRulesJSON(flag.Rules); err != nil {
 		return repository.Flag{}, err
@@ -158,6 +165,9 @@ func (s *Service) UpdateFlag(ctx context.Context, flag repository.Flag) (reposit
 	if strings.TrimSpace(flag.Key) == "" {
 		return repository.Flag{}, errors.New("flag key is required")
 	}
+	if strings.TrimSpace(flag.ProjectID) == "" {
+		return repository.Flag{}, errors.New("project ID is required")
+	}
 	if _, err := parseRulesJSON(flag.Rules); err != nil {
 		return repository.Flag{}, err
 	}
@@ -168,7 +178,7 @@ func (s *Service) UpdateFlag(ctx context.Context, flag repository.Flag) (reposit
 	updated, err := s.repo.UpdateFlag(ctx, flag)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			s.deleteCachedFlag(flag.Key)
+			s.deleteCachedFlag(flag.ProjectID, flag.Key)
 			return repository.Flag{}, ErrFlagNotFound
 		}
 		return repository.Flag{}, fmt.Errorf("update flag: %w", err)
@@ -180,19 +190,22 @@ func (s *Service) UpdateFlag(ctx context.Context, flag repository.Flag) (reposit
 	return updated, nil
 }
 
-// GetFlag returns a flag by key, serving from the in-memory cache when
+// GetFlag returns a flag by projectID and key, serving from the in-memory cache when
 // available and falling back to the repository. Returns [ErrFlagNotFound]
 // if the flag does not exist.
-func (s *Service) GetFlag(ctx context.Context, key string) (repository.Flag, error) {
+func (s *Service) GetFlag(ctx context.Context, projectID, key string) (repository.Flag, error) {
 	if strings.TrimSpace(key) == "" {
 		return repository.Flag{}, errors.New("flag key is required")
 	}
+	if strings.TrimSpace(projectID) == "" {
+		return repository.Flag{}, errors.New("project ID is required")
+	}
 
-	if flag, ok := s.getCachedFlag(key); ok {
+	if flag, ok := s.getCachedFlag(projectID, key); ok {
 		return flag, nil
 	}
 
-	flag, err := s.repo.GetFlag(ctx, key)
+	flag, err := s.repo.GetFlag(ctx, projectID, key)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return repository.Flag{}, ErrFlagNotFound
@@ -204,12 +217,17 @@ func (s *Service) GetFlag(ctx context.Context, key string) (repository.Flag, err
 	return flag, nil
 }
 
-// ListFlags returns all flags from the in-memory cache, sorted by key.
-// This method never hits the database — it's cache all the way down.
-func (s *Service) ListFlags(_ context.Context) ([]repository.Flag, error) {
+// ListFlags returns all flags for a given project from the in-memory cache, sorted by key.
+func (s *Service) ListFlags(_ context.Context, projectID string) ([]repository.Flag, error) {
 	s.mu.RLock()
-	flags := make([]repository.Flag, 0, len(s.cache))
-	for _, flag := range s.cache {
+	projectFlags, ok := s.cache[projectID]
+	if !ok {
+		s.mu.RUnlock()
+		return []repository.Flag{}, nil
+	}
+
+	flags := make([]repository.Flag, 0, len(projectFlags))
+	for _, flag := range projectFlags {
 		flags = append(flags, flag)
 	}
 	s.mu.RUnlock()
@@ -221,24 +239,24 @@ func (s *Service) ListFlags(_ context.Context) ([]repository.Flag, error) {
 	return flags, nil
 }
 
-// DeleteFlag removes a flag by key. Returns [ErrFlagNotFound] if the flag
+// DeleteFlag removes a flag by projectID and key. Returns [ErrFlagNotFound] if the flag
 // does not exist. On success, the cache is updated and a "deleted" event is
 // published.
-func (s *Service) DeleteFlag(ctx context.Context, key string) error {
-	existing, err := s.GetFlag(ctx, key)
+func (s *Service) DeleteFlag(ctx context.Context, projectID, key string) error {
+	existing, err := s.GetFlag(ctx, projectID, key)
 	if err != nil {
 		return err
 	}
 
-	if err := s.repo.DeleteFlag(ctx, key); err != nil {
+	if err := s.repo.DeleteFlag(ctx, projectID, key); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			s.deleteCachedFlag(key)
+			s.deleteCachedFlag(projectID, key)
 			return ErrFlagNotFound
 		}
 		return fmt.Errorf("delete flag: %w", err)
 	}
 
-	s.deleteCachedFlag(key)
+	s.deleteCachedFlag(projectID, key)
 	s.publishFlagEventBestEffort(ctx, EventTypeDeleted, existing)
 
 	return nil
@@ -247,8 +265,8 @@ func (s *Service) DeleteFlag(ctx context.Context, key string) error {
 // ResolveBoolean evaluates a single flag against the given context and returns
 // a boolean result. If the flag is not found, the provided default value is
 // returned without error.
-func (s *Service) ResolveBoolean(ctx context.Context, key string, evalContext core.EvaluationContext, defaultValue bool) (bool, error) {
-	flag, err := s.GetFlag(ctx, key)
+func (s *Service) ResolveBoolean(ctx context.Context, projectID, key string, evalContext core.EvaluationContext, defaultValue bool) (bool, error) {
+	flag, err := s.GetFlag(ctx, projectID, key)
 	if err != nil {
 		if errors.Is(err, ErrFlagNotFound) {
 			return defaultValue, nil
@@ -269,7 +287,7 @@ func (s *Service) ResolveBoolean(ctx context.Context, key string, evalContext co
 func (s *Service) ResolveBatch(ctx context.Context, requests []ResolveRequest) ([]ResolveResult, error) {
 	results := make([]ResolveResult, 0, len(requests))
 	for _, request := range requests {
-		value, err := s.ResolveBoolean(ctx, request.Key, request.Context, request.DefaultValue)
+		value, err := s.ResolveBoolean(ctx, request.ProjectID, request.Key, request.Context, request.DefaultValue)
 		if err != nil {
 			return nil, err
 		}
@@ -285,8 +303,11 @@ func (s *Service) ResolveBatch(ctx context.Context, requests []ResolveRequest) (
 
 // ListEventsSince returns flag events with IDs greater than eventID, used by
 // streaming consumers to poll for updates.
-func (s *Service) ListEventsSince(ctx context.Context, eventID int64) ([]repository.FlagEvent, error) {
-	events, err := s.repo.ListEventsSince(ctx, eventID)
+func (s *Service) ListEventsSince(ctx context.Context, projectID string, eventID int64) ([]repository.FlagEvent, error) {
+	if strings.TrimSpace(projectID) == "" {
+	return nil, errors.New("project ID is required")
+	}
+	events, err := s.repo.ListEventsSince(ctx, projectID, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("list events since %d: %w", eventID, err)
 	}
@@ -296,12 +317,15 @@ func (s *Service) ListEventsSince(ctx context.Context, eventID int64) ([]reposit
 
 // ListEventsSinceForKey returns flag events for a specific key with IDs greater
 // than eventID, enabling per-flag streaming in gRPC WatchFlag.
-func (s *Service) ListEventsSinceForKey(ctx context.Context, eventID int64, key string) ([]repository.FlagEvent, error) {
+func (s *Service) ListEventsSinceForKey(ctx context.Context, projectID string, eventID int64, key string) ([]repository.FlagEvent, error) {
+	if strings.TrimSpace(projectID) == "" {
+		return nil, errors.New("project ID is required")
+	}
 	if strings.TrimSpace(key) == "" {
 		return nil, errors.New("flag key is required")
 	}
 
-	events, err := s.repo.ListEventsSinceForKey(ctx, eventID, key)
+	events, err := s.repo.ListEventsSinceForKey(ctx, projectID, eventID, key)
 	if err != nil {
 		return nil, fmt.Errorf("list events since %d for key %q: %w", eventID, key, err)
 	}
@@ -309,24 +333,39 @@ func (s *Service) ListEventsSinceForKey(ctx context.Context, eventID int64, key 
 	return events, nil
 }
 
-func (s *Service) getCachedFlag(key string) (repository.Flag, bool) {
+func (s *Service) getCachedFlag(projectID, key string) (repository.Flag, bool) {
 	s.mu.RLock()
-	flag, ok := s.cache[key]
-	s.mu.RUnlock()
+	defer s.mu.RUnlock()
 
-	return flag, ok
+	if projectFlags, ok := s.cache[projectID]; ok {
+		if flag, ok := projectFlags[key]; ok {
+			return flag, true
+		}
+	}
+
+	return repository.Flag{}, false
 }
 
 func (s *Service) setCachedFlag(flag repository.Flag) {
 	s.mu.Lock()
-	s.cache[flag.Key] = flag
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.cache[flag.ProjectID]; !ok {
+		s.cache[flag.ProjectID] = make(map[string]repository.Flag)
+	}
+	s.cache[flag.ProjectID][flag.Key] = flag
 }
 
-func (s *Service) deleteCachedFlag(key string) {
+func (s *Service) deleteCachedFlag(projectID, key string) {
 	s.mu.Lock()
-	delete(s.cache, key)
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+
+	if projectFlags, ok := s.cache[projectID]; ok {
+		delete(projectFlags, key)
+		if len(projectFlags) == 0 {
+			delete(s.cache, projectID)
+		}
+	}
 }
 
 func (s *Service) startCacheInvalidationListener(ctx context.Context, subscriber cacheInvalidationSubscriber) error {
@@ -389,6 +428,7 @@ func (s *Service) publishFlagEvent(ctx context.Context, eventType string, flag r
 	}
 
 	_, err = s.repo.PublishFlagEvent(ctx, repository.FlagEvent{
+		ProjectID: flag.ProjectID,
 		FlagKey:   flag.Key,
 		EventType: eventType,
 		Payload:   payload,

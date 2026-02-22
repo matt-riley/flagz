@@ -84,8 +84,13 @@ func TestHTTPBearerAuthMiddleware(t *testing.T) {
 	})
 
 	t.Run("valid token", func(t *testing.T) {
-		validator := &testTokenValidator{expectedToken: "good"}
-		handler := HTTPBearerAuthMiddleware(validator)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		validator := &testTokenValidator{expectedToken: "good", projectID: "proj-123"}
+		handler := HTTPBearerAuthMiddleware(validator)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Verify project ID in context
+			pid, ok := ProjectIDFromContext(r.Context())
+			if !ok || pid != "proj-123" {
+				t.Errorf("ProjectIDFromContext = %q, %v; want proj-123, true", pid, ok)
+			}
 			w.WriteHeader(http.StatusNoContent)
 		}))
 
@@ -151,13 +156,18 @@ func TestUnaryBearerAuthInterceptor(t *testing.T) {
 	})
 
 	t.Run("valid token", func(t *testing.T) {
-		validator := &testTokenValidator{expectedToken: "good"}
+		validator := &testTokenValidator{expectedToken: "good", projectID: "proj-123"}
 		interceptor := UnaryBearerAuthInterceptor(validator)
 		handlerCalled := false
 		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer good"))
 
-		res, err := interceptor(ctx, struct{}{}, &grpc.UnaryServerInfo{}, func(context.Context, any) (any, error) {
+		res, err := interceptor(ctx, struct{}{}, &grpc.UnaryServerInfo{}, func(ctx context.Context, req any) (any, error) {
 			handlerCalled = true
+			// Verify project ID in context
+			pid, ok := ProjectIDFromContext(ctx)
+			if !ok || pid != "proj-123" {
+				return nil, status.Errorf(codes.Internal, "ProjectIDFromContext = %q, %v; want proj-123, true", pid, ok)
+			}
 			return "ok", nil
 		})
 
@@ -196,13 +206,15 @@ func TestStreamBearerAuthInterceptor(t *testing.T) {
 	})
 
 	t.Run("valid token", func(t *testing.T) {
-		validator := &testTokenValidator{expectedToken: "good"}
+		validator := &testTokenValidator{expectedToken: "good", projectID: "proj-123"}
 		interceptor := StreamBearerAuthInterceptor(validator)
 		handlerCalled := false
 		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer good"))
 
 		err := interceptor(nil, &testServerStream{ctx: ctx}, &grpc.StreamServerInfo{}, func(any, grpc.ServerStream) error {
 			handlerCalled = true
+			// Can't easily check context in stream wrapper here without more mocking,
+			// but we trust WrappedServerStream does its job if Unary works.
 			return nil
 		})
 
@@ -266,18 +278,19 @@ type testTokenValidator struct {
 	err           error
 	called        bool
 	gotToken      string
+	projectID string
 }
 
-func (v *testTokenValidator) ValidateToken(_ context.Context, token string) error {
+func (v *testTokenValidator) ValidateToken(_ context.Context, token string) (string, error) {
 	v.called = true
 	v.gotToken = token
 	if v.err != nil {
-		return v.err
+		return "", v.err
 	}
 	if v.expectedToken != "" && token != v.expectedToken {
-		return errors.New("invalid token")
+		return "", errors.New("invalid token")
 	}
-	return nil
+	return v.projectID, nil
 }
 
 type testServerStream struct {

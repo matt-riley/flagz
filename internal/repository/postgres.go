@@ -26,6 +26,7 @@ const (
 // the service layer handles the conversion.
 type Flag struct {
 	Key         string          `json:"key"`
+	ProjectID   string          `json:"project_id"`
 	Description string          `json:"description"`
 	Enabled     bool            `json:"enabled"`
 	Variants    json.RawMessage `json:"variants"`
@@ -34,9 +35,37 @@ type Flag struct {
 	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
+// Project represents a tenant or namespace for flags.
+type Project struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// AdminUser represents an administrator account.
+type AdminUser struct {
+	ID           string    `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// AdminSession represents an authenticated admin session.
+type AdminSession struct {
+	IDHash      string    `json:"-"`
+	AdminUserID string    `json:"admin_user_id"`
+	CSRFToken   string    `json:"csrf_token"`
+	CreatedAt   time.Time `json:"created_at"`
+	ExpiresAt   time.Time `json:"expires_at"`
+}
+
 // APIKey represents a stored API key record used for bearer-token authentication.
 type APIKey struct {
 	ID        string     `json:"id"`
+	ProjectID string     `json:"project_id"`
 	Name      string     `json:"name"`
 	KeyHash   string     `json:"key_hash"`
 	CreatedAt time.Time  `json:"created_at"`
@@ -47,6 +76,7 @@ type APIKey struct {
 // table and used to drive SSE and gRPC streaming.
 type FlagEvent struct {
 	EventID   int64           `json:"event_id"`
+	ProjectID string          `json:"project_id"`
 	FlagKey   string          `json:"flag_key"`
 	EventType string          `json:"event_type"`
 	Payload   json.RawMessage `json:"payload"`
@@ -81,16 +111,18 @@ func NewPostgresRepositoryWithChannel(pool *pgxpool.Pool, notifyChannel string) 
 func (r *PostgresRepository) CreateFlag(ctx context.Context, flag Flag) (Flag, error) {
 	var created Flag
 	err := r.pool.QueryRow(ctx, `
-		INSERT INTO flags (key, description, enabled, variants, rules)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING key, description, enabled, variants, rules, created_at, updated_at
+		INSERT INTO flags (project_id, key, description, enabled, variants, rules)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING project_id, key, description, enabled, variants, rules, created_at, updated_at
 	`,
+		flag.ProjectID,
 		flag.Key,
 		flag.Description,
 		flag.Enabled,
 		ensureJSON(flag.Variants, "{}"),
 		ensureJSON(flag.Rules, "[]"),
 	).Scan(
+		&created.ProjectID,
 		&created.Key,
 		&created.Description,
 		&created.Enabled,
@@ -106,26 +138,28 @@ func (r *PostgresRepository) CreateFlag(ctx context.Context, flag Flag) (Flag, e
 	return created, nil
 }
 
-// UpdateFlag updates an existing flag row identified by key and returns the
+// UpdateFlag updates an existing flag row identified by project_id and key and returns the
 // updated record. Returns pgx.ErrNoRows (wrapped) if the flag does not exist.
 func (r *PostgresRepository) UpdateFlag(ctx context.Context, flag Flag) (Flag, error) {
 	var updated Flag
 	err := r.pool.QueryRow(ctx, `
 		UPDATE flags
-		SET description = $2,
-		    enabled = $3,
-		    variants = $4,
-		    rules = $5,
+		SET description = $3,
+		    enabled = $4,
+		    variants = $5,
+		    rules = $6,
 		    updated_at = NOW()
-		WHERE key = $1
-		RETURNING key, description, enabled, variants, rules, created_at, updated_at
+		WHERE project_id = $1 AND key = $2
+		RETURNING project_id, key, description, enabled, variants, rules, created_at, updated_at
 	`,
+		flag.ProjectID,
 		flag.Key,
 		flag.Description,
 		flag.Enabled,
 		ensureJSON(flag.Variants, "{}"),
 		ensureJSON(flag.Rules, "[]"),
 	).Scan(
+		&updated.ProjectID,
 		&updated.Key,
 		&updated.Description,
 		&updated.Enabled,
@@ -141,15 +175,16 @@ func (r *PostgresRepository) UpdateFlag(ctx context.Context, flag Flag) (Flag, e
 	return updated, nil
 }
 
-// GetFlag retrieves a single flag by its key. Returns pgx.ErrNoRows (wrapped)
+// GetFlag retrieves a single flag by its project_id and key. Returns pgx.ErrNoRows (wrapped)
 // if not found.
-func (r *PostgresRepository) GetFlag(ctx context.Context, key string) (Flag, error) {
+func (r *PostgresRepository) GetFlag(ctx context.Context, projectID, key string) (Flag, error) {
 	var flag Flag
 	err := r.pool.QueryRow(ctx, `
-		SELECT key, description, enabled, variants, rules, created_at, updated_at
+		SELECT project_id, key, description, enabled, variants, rules, created_at, updated_at
 		FROM flags
-		WHERE key = $1
-	`, key).Scan(
+		WHERE project_id = $1 AND key = $2
+	`, projectID, key).Scan(
+		&flag.ProjectID,
 		&flag.Key,
 		&flag.Description,
 		&flag.Enabled,
@@ -165,12 +200,12 @@ func (r *PostgresRepository) GetFlag(ctx context.Context, key string) (Flag, err
 	return flag, nil
 }
 
-// ListFlags returns all flags ordered by key.
+// ListFlags returns all flags across all projects ordered by project_id and key.
 func (r *PostgresRepository) ListFlags(ctx context.Context) ([]Flag, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT key, description, enabled, variants, rules, created_at, updated_at
+		SELECT project_id, key, description, enabled, variants, rules, created_at, updated_at
 		FROM flags
-		ORDER BY key
+		ORDER BY project_id, key
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("list flags: %w", err)
@@ -181,6 +216,7 @@ func (r *PostgresRepository) ListFlags(ctx context.Context) ([]Flag, error) {
 	for rows.Next() {
 		var flag Flag
 		if err := rows.Scan(
+			&flag.ProjectID,
 			&flag.Key,
 			&flag.Description,
 			&flag.Enabled,
@@ -202,10 +238,10 @@ func (r *PostgresRepository) ListFlags(ctx context.Context) ([]Flag, error) {
 	return flags, nil
 }
 
-// DeleteFlag removes a flag by key. Returns pgx.ErrNoRows (wrapped) if the
+// DeleteFlag removes a flag by project_id and key. Returns pgx.ErrNoRows (wrapped) if the
 // flag does not exist.
-func (r *PostgresRepository) DeleteFlag(ctx context.Context, key string) error {
-	commandTag, err := r.pool.Exec(ctx, `DELETE FROM flags WHERE key = $1`, key)
+func (r *PostgresRepository) DeleteFlag(ctx context.Context, projectID, key string) error {
+	commandTag, err := r.pool.Exec(ctx, `DELETE FROM flags WHERE project_id = $1 AND key = $2`, projectID, key)
 	if err != nil {
 		return fmt.Errorf("delete flag: %w", err)
 	}
@@ -218,30 +254,31 @@ func (r *PostgresRepository) DeleteFlag(ctx context.Context, key string) error {
 
 // ValidateAPIKey returns the stored hash for a non-revoked key ID.
 // Callers should do constant-time comparison outside this package.
-func (r *PostgresRepository) ValidateAPIKey(ctx context.Context, id string) (string, error) {
+func (r *PostgresRepository) ValidateAPIKey(ctx context.Context, id string) (string, string, error) {
 	var keyHash string
+	var projectID string
 	if err := r.pool.QueryRow(ctx, `
-		SELECT key_hash
+		SELECT key_hash, project_id
 		FROM api_keys
 		WHERE id = $1
 		  AND revoked_at IS NULL
-	`, id).Scan(&keyHash); err != nil {
-		return "", fmt.Errorf("validate api key: %w", err)
+	`, id).Scan(&keyHash, &projectID); err != nil {
+		return "", "", fmt.Errorf("validate api key: %w", err)
 	}
 
-	return keyHash, nil
+	return keyHash, projectID, nil
 }
 
 // ListEventsSince returns up to 1000 flag events with IDs greater than
 // eventID, ordered by event ID.
-func (r *PostgresRepository) ListEventsSince(ctx context.Context, eventID int64) ([]FlagEvent, error) {
+func (r *PostgresRepository) ListEventsSince(ctx context.Context, projectID string, eventID int64) ([]FlagEvent, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT event_id, flag_key, event_type, payload, created_at
+		SELECT event_id, project_id, flag_key, event_type, payload, created_at
 		FROM flag_events
-		WHERE event_id > $1
+		WHERE event_id > $1 AND project_id = $2
 		ORDER BY event_id
-		LIMIT $2
-	`, eventID, maxEventBatchSize)
+		LIMIT $3
+	`, eventID, projectID, maxEventBatchSize)
 	if err != nil {
 		return nil, fmt.Errorf("list events since: %w", err)
 	}
@@ -252,6 +289,7 @@ func (r *PostgresRepository) ListEventsSince(ctx context.Context, eventID int64)
 		var event FlagEvent
 		if err := rows.Scan(
 			&event.EventID,
+			&event.ProjectID,
 			&event.FlagKey,
 			&event.EventType,
 			&event.Payload,
@@ -272,15 +310,29 @@ func (r *PostgresRepository) ListEventsSince(ctx context.Context, eventID int64)
 
 // ListEventsSinceForKey returns up to 1000 flag events for a specific flag key
 // with IDs greater than eventID, ordered by event ID.
-func (r *PostgresRepository) ListEventsSinceForKey(ctx context.Context, eventID int64, key string) ([]FlagEvent, error) {
+func (r *PostgresRepository) ListEventsSinceForKey(ctx context.Context, projectID string, eventID int64, key string) ([]FlagEvent, error) {
+	// WARNING: This method is ambiguous without projectID!
+	// But the interface in service/repository layer might not have changed?
+	// The caller service.ListEventsSinceForKey accepts key but not projectID?
+	// Wait, ListEventsSinceForKey in Service should also take projectID if flags are scoped!
+	// Let's assume for now we filter by key ONLY, which is dangerous if duplicate keys exist.
+	// But wait, the repo method signature has `key string`.
+	// I should probably update this method to take `projectID` as well, but that changes the interface.
+	// For now, let's just update the query to select project_id, but it will return events for ALL projects with this key.
+	// This is technically what was requested, but it's bad.
+	// Better: Update the signature to take projectID.
+	
+	// BUT, changing signature breaks interface in service.go.
+	// Let's first update the struct scan.
+	
 	rows, err := r.pool.Query(ctx, `
-		SELECT event_id, flag_key, event_type, payload, created_at
+		SELECT event_id, project_id, flag_key, event_type, payload, created_at
 		FROM flag_events
 		WHERE event_id > $1
-		  AND flag_key = $2
+		  AND project_id = $2 AND flag_key = $3
 		ORDER BY event_id
-		LIMIT $3
-	`, eventID, key, maxEventBatchSize)
+		LIMIT $4
+	`, eventID, projectID, key, maxEventBatchSize)
 	if err != nil {
 		return nil, fmt.Errorf("list events since for key: %w", err)
 	}
@@ -291,6 +343,7 @@ func (r *PostgresRepository) ListEventsSinceForKey(ctx context.Context, eventID 
 		var event FlagEvent
 		if err := rows.Scan(
 			&event.EventID,
+			&event.ProjectID,
 			&event.FlagKey,
 			&event.EventType,
 			&event.Payload,
@@ -309,6 +362,149 @@ func (r *PostgresRepository) ListEventsSinceForKey(ctx context.Context, eventID 
 	return events, nil
 }
 
+// CreateProject inserts a new project.
+func (r *PostgresRepository) CreateProject(ctx context.Context, name, description string) (Project, error) {
+	var p Project
+	err := r.pool.QueryRow(ctx, `
+		INSERT INTO projects (name, description)
+		VALUES ($1, $2)
+		RETURNING id, name, description, created_at, updated_at
+	`, name, description).Scan(
+		&p.ID,
+		&p.Name,
+		&p.Description,
+		&p.CreatedAt,
+		&p.UpdatedAt,
+	)
+	if err != nil {
+		return Project{}, fmt.Errorf("create project: %w", err)
+	}
+	return p, nil
+}
+
+// ListProjects returns all projects.
+func (r *PostgresRepository) ListProjects(ctx context.Context) ([]Project, error) {
+	rows, err := r.pool.Query(ctx, `SELECT id, name, description, created_at, updated_at FROM projects ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("list projects: %w", err)
+	}
+	defer rows.Close()
+
+	projects := make([]Project, 0)
+	for rows.Next() {
+		var p Project
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan project: %w", err)
+		}
+		projects = append(projects, p)
+	}
+	return projects, nil
+}
+
+// GetProject retrieves a project by ID.
+func (r *PostgresRepository) GetProject(ctx context.Context, id string) (Project, error) {
+	var p Project
+	err := r.pool.QueryRow(ctx, `
+		SELECT id, name, description, created_at, updated_at
+		FROM projects
+		WHERE id = $1
+	`, id).Scan(&p.ID, &p.Name, &p.Description, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		return Project{}, fmt.Errorf("get project: %w", err)
+	}
+	return p, nil
+}
+
+// CreateAdminUser inserts a new admin user.
+func (r *PostgresRepository) CreateAdminUser(ctx context.Context, username, passwordHash string) (AdminUser, error) {
+	var u AdminUser
+	err := r.pool.QueryRow(ctx, `
+		INSERT INTO admin_users (username, password_hash)
+		VALUES ($1, $2)
+		RETURNING id, username, created_at, updated_at
+	`, username, passwordHash).Scan(
+		&u.ID,
+		&u.Username,
+		&u.CreatedAt,
+		&u.UpdatedAt,
+	)
+	if err != nil {
+		return AdminUser{}, fmt.Errorf("create admin user: %w", err)
+	}
+	return u, nil
+}
+
+// GetAdminUserByUsername retrieves an admin user by username.
+func (r *PostgresRepository) GetAdminUserByUsername(ctx context.Context, username string) (AdminUser, error) {
+	var u AdminUser
+	err := r.pool.QueryRow(ctx, `
+		SELECT id, username, password_hash, created_at, updated_at
+		FROM admin_users
+		WHERE username = $1
+	`, username).Scan(
+		&u.ID,
+		&u.Username,
+		&u.PasswordHash,
+		&u.CreatedAt,
+		&u.UpdatedAt,
+	)
+	if err != nil {
+		return AdminUser{}, fmt.Errorf("get admin user: %w", err)
+	}
+	return u, nil
+}
+
+// HasAdminUsers returns true if any admin user exists.
+func (r *PostgresRepository) HasAdminUsers(ctx context.Context) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM admin_users)`).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check admin users: %w", err)
+	}
+	return exists, nil
+}
+
+// CreateAdminSession creates a new session.
+func (r *PostgresRepository) CreateAdminSession(ctx context.Context, session AdminSession) error {
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO admin_sessions (id_hash, admin_user_id, csrf_token, created_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5)
+	`, session.IDHash, session.AdminUserID, session.CSRFToken, session.CreatedAt, session.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("create admin session: %w", err)
+	}
+	return nil
+}
+
+// GetAdminSession retrieves a session by ID hash.
+func (r *PostgresRepository) GetAdminSession(ctx context.Context, idHash string) (AdminSession, error) {
+	var s AdminSession
+	err := r.pool.QueryRow(ctx, `
+		SELECT id_hash, admin_user_id, csrf_token, created_at, expires_at
+		FROM admin_sessions
+		WHERE id_hash = $1 AND expires_at > NOW()
+	`, idHash).Scan(
+		&s.IDHash,
+		&s.AdminUserID,
+		&s.CSRFToken,
+		&s.CreatedAt,
+		&s.ExpiresAt,
+	)
+	if err != nil {
+		return AdminSession{}, fmt.Errorf("get admin session: %w", err)
+	}
+	return s, nil
+}
+
+// DeleteAdminSession removes a session.
+func (r *PostgresRepository) DeleteAdminSession(ctx context.Context, idHash string) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM admin_sessions WHERE id_hash = $1`, idHash)
+	if err != nil {
+		return fmt.Errorf("delete admin session: %w", err)
+	}
+	return nil
+}
+
 // PublishFlagEvent inserts a flag event and sends a PostgreSQL NOTIFY on the
 // configured channel within a single transaction.
 func (r *PostgresRepository) PublishFlagEvent(ctx context.Context, event FlagEvent) (FlagEvent, error) {
@@ -320,15 +516,17 @@ func (r *PostgresRepository) PublishFlagEvent(ctx context.Context, event FlagEve
 
 	var created FlagEvent
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO flag_events (flag_key, event_type, payload)
-		VALUES ($1, $2, $3)
-		RETURNING event_id, flag_key, event_type, payload, created_at
+		INSERT INTO flag_events (project_id, flag_key, event_type, payload)
+		VALUES ($1, $2, $3, $4)
+		RETURNING event_id, project_id, flag_key, event_type, payload, created_at
 	`,
+		event.ProjectID,
 		event.FlagKey,
 		event.EventType,
 		ensureJSON(event.Payload, "{}"),
 	).Scan(
 		&created.EventID,
+		&created.ProjectID,
 		&created.FlagKey,
 		&created.EventType,
 		&created.Payload,
@@ -436,9 +634,11 @@ func listenStatement(channel string) string {
 
 func marshalNotifyPayload(event FlagEvent) (string, error) {
 	serialized, err := json.Marshal(struct {
+		ProjectID string `json:"project_id"`
 		FlagKey   string `json:"flag_key"`
 		EventType string `json:"event_type"`
 	}{
+		ProjectID: event.ProjectID,
 		FlagKey:   event.FlagKey,
 		EventType: event.EventType,
 	})

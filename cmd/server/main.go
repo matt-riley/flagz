@@ -24,12 +24,14 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	flagspb "github.com/matt-riley/flagz/api/proto/v1"
+	"github.com/matt-riley/flagz/internal/admin"
 	"github.com/matt-riley/flagz/internal/config"
 	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 	"github.com/matt-riley/flagz/internal/server"
 	"github.com/matt-riley/flagz/internal/service"
 	"google.golang.org/grpc"
+	"tailscale.com/tsnet"
 )
 
 const (
@@ -47,6 +49,7 @@ func main() {
 }
 
 func run() error {
+	// ... (no change needed here, just context)
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -84,6 +87,53 @@ func run() error {
 		grpc.StreamInterceptor(middleware.StreamBearerAuthInterceptor(tokenValidator)),
 	)
 	flagspb.RegisterFlagServiceServer(grpcServer, server.NewGRPCServerWithStreamPollInterval(svc, cfg.StreamPollInterval))
+
+	// -------------------------------------------------------------------------
+	// Admin Portal (Tailscale)
+	// -------------------------------------------------------------------------
+	var tsServer *tsnet.Server
+	var adminLis net.Listener
+
+	if cfg.AdminHostname != "" {
+		if cfg.TSAuthKey == "" {
+			return errors.New("ADMIN_HOSTNAME is set but TS_AUTH_KEY is missing")
+		}
+
+		dir := cfg.TSStateDir
+		if dir == "" {
+			dir = "./ts-state"
+		}
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return fmt.Errorf("create ts-state dir: %w", err)
+		}
+
+		tsServer = &tsnet.Server{
+			Hostname: cfg.AdminHostname,
+			AuthKey:  cfg.TSAuthKey,
+			Dir:      dir,
+			Logf:     func(format string, args ...any) {}, // Quiet logs
+		}
+
+		// Create admin session manager
+		sessionMgr := admin.NewSessionManager(repo, cfg.SessionSecret)
+
+		// Create admin handler
+		adminHandler := admin.NewHandler(repo, svc, sessionMgr, cfg.AdminHostname)
+
+		// Listen on tailnet
+		var err error
+		adminLis, err = tsServer.Listen("tcp", ":80") // Standard HTTP port on tailnet IP
+		if err != nil {
+			return fmt.Errorf("listen tailnet: %w", err)
+		}
+		log.Printf("Admin portal listening on http://%s (Tailscale)", cfg.AdminHostname)
+
+		go func() {
+			if err := http.Serve(adminLis, adminHandler); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("Admin server error: %v", err)
+			}
+		}()
+	}
 
 	httpListener, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {
@@ -136,6 +186,10 @@ func run() error {
 		grpcServer.Stop()
 	}
 
+	if tsServer != nil {
+		tsServer.Close()
+	}
+
 	return serveErr
 }
 
@@ -151,30 +205,30 @@ func newHTTPHandler(apiHandler http.Handler, tokenValidator middleware.TokenVali
 }
 
 type apiKeyHashLookup interface {
-	ValidateAPIKey(ctx context.Context, id string) (string, error)
+	ValidateAPIKey(ctx context.Context, id string) (string, string, error)
 }
 
 type apiKeyTokenValidator struct {
 	lookup apiKeyHashLookup
 }
 
-func (v *apiKeyTokenValidator) ValidateToken(ctx context.Context, token string) error {
+func (v *apiKeyTokenValidator) ValidateToken(ctx context.Context, token string) (string, error) {
 	if v == nil || v.lookup == nil {
-		return errors.New("api key validator is nil")
+		return "", errors.New("api key validator is nil")
 	}
 
 	keyID, rawSecret, found := strings.Cut(token, ".")
 	if !found || strings.TrimSpace(keyID) == "" || rawSecret == "" {
-		return errors.New("invalid token format")
+		return "", errors.New("invalid token format")
 	}
 
-	keyHash, err := v.lookup.ValidateAPIKey(ctx, keyID)
+	keyHash, projectID, err := v.lookup.ValidateAPIKey(ctx, keyID)
 	if err != nil {
-		return fmt.Errorf("lookup key hash: %w", err)
+		return "", fmt.Errorf("lookup key hash: %w", err)
 	}
 	if !middleware.APIKeyMatchesHash(keyHash, rawSecret) {
-		return errors.New("invalid token")
+		return "", errors.New("invalid token")
 	}
 
-	return nil
+	return projectID, nil
 }

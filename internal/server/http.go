@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/matt-riley/flagz/internal/core"
+	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 	"github.com/matt-riley/flagz/internal/service"
 )
@@ -94,6 +95,12 @@ func (s *HTTPServer) withMetrics(next http.Handler) http.Handler {
 }
 
 func (s *HTTPServer) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := middleware.ProjectIDFromContext(r.Context())
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var flag repository.Flag
 	if err := decodeJSONBody(w, r, &flag); err != nil {
 		writeJSONDecodeError(w, err)
@@ -104,6 +111,9 @@ func (s *HTTPServer) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "key is required")
 		return
 	}
+	
+	// Force project ID from context
+	flag.ProjectID = projectID
 
 	created, err := s.service.CreateFlag(r.Context(), flag)
 	if err != nil {
@@ -115,13 +125,19 @@ func (s *HTTPServer) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleGetFlag(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := middleware.ProjectIDFromContext(r.Context())
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	key := strings.TrimSpace(r.PathValue("key"))
 	if key == "" {
 		writeJSONError(w, http.StatusBadRequest, "key is required")
 		return
 	}
 
-	flag, err := s.service.GetFlag(r.Context(), key)
+	flag, err := s.service.GetFlag(r.Context(), projectID, key)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -131,7 +147,13 @@ func (s *HTTPServer) handleGetFlag(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleListFlags(w http.ResponseWriter, r *http.Request) {
-	flags, err := s.service.ListFlags(r.Context())
+	projectID, ok := middleware.ProjectIDFromContext(r.Context())
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	flags, err := s.service.ListFlags(r.Context(), projectID)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -141,6 +163,12 @@ func (s *HTTPServer) handleListFlags(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleUpdateFlag(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := middleware.ProjectIDFromContext(r.Context())
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	key := strings.TrimSpace(r.PathValue("key"))
 	if key == "" {
 		writeJSONError(w, http.StatusBadRequest, "key is required")
@@ -158,6 +186,7 @@ func (s *HTTPServer) handleUpdateFlag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	flag.Key = key
+	flag.ProjectID = projectID
 
 	updated, err := s.service.UpdateFlag(r.Context(), flag)
 	if err != nil {
@@ -169,13 +198,19 @@ func (s *HTTPServer) handleUpdateFlag(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleDeleteFlag(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := middleware.ProjectIDFromContext(r.Context())
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	key := strings.TrimSpace(r.PathValue("key"))
 	if key == "" {
 		writeJSONError(w, http.StatusBadRequest, "key is required")
 		return
 	}
 
-	if err := s.service.DeleteFlag(r.Context(), key); err != nil {
+	if err := s.service.DeleteFlag(r.Context(), projectID, key); err != nil {
 		writeServiceError(w, err)
 		return
 	}
@@ -184,6 +219,12 @@ func (s *HTTPServer) handleDeleteFlag(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleEvaluate(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := middleware.ProjectIDFromContext(r.Context())
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var request evaluateJSONRequest
 	if err := decodeJSONBody(w, r, &request); err != nil {
 		writeJSONDecodeError(w, err)
@@ -203,6 +244,7 @@ func (s *HTTPServer) handleEvaluate(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			requests = append(requests, service.ResolveRequest{
+				ProjectID:    projectID,
 				Key:          item.Key,
 				Context:      item.Context,
 				DefaultValue: item.DefaultValue,
@@ -210,6 +252,7 @@ func (s *HTTPServer) handleEvaluate(w http.ResponseWriter, r *http.Request) {
 		}
 	case strings.TrimSpace(request.Key) != "":
 		requests = append(requests, service.ResolveRequest{
+			ProjectID:    projectID,
 			Key:          request.Key,
 			Context:      request.Context,
 			DefaultValue: request.DefaultValue,
@@ -229,6 +272,11 @@ func (s *HTTPServer) handleEvaluate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := middleware.ProjectIDFromContext(r.Context())
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	lastEventID, err := parseLastEventID(r.Header.Get("Last-Event-ID"))
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid Last-Event-ID")
@@ -264,7 +312,7 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 		return nil
 	}
 
-	initialEvents, err := s.service.ListEventsSince(r.Context(), currentEventID)
+	initialEvents, err := s.service.ListEventsSince(r.Context(), projectID, currentEventID)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -289,7 +337,7 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
-			events, err := s.service.ListEventsSince(r.Context(), currentEventID)
+			events, err := s.service.ListEventsSince(r.Context(), projectID, currentEventID)
 			if err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return

@@ -30,6 +30,10 @@ type Config struct {
 	HTTPAddr           string
 	GRPCAddr           string
 	StreamPollInterval time.Duration
+	AdminHostname      string
+	TSAuthKey          string
+	TSStateDir         string
+	SessionSecret      string
 }
 
 // Load reads configuration from environment variables, applying defaults where
@@ -40,6 +44,11 @@ func Load() (Config, error) {
 	if databaseURL == "" {
 		return Config{}, errors.New("DATABASE_URL is required")
 	}
+
+	sessionSecret := strings.TrimSpace(os.Getenv("SESSION_SECRET"))
+	// Only require session secret if admin is enabled (via ADMIN_HOSTNAME)
+	// But wait, ADMIN_HOSTNAME is parsed below.
+	// Let's defer this check until we check ADMIN_HOSTNAME.
 
 	streamPollInterval := defaultStreamPollInterval
 	if value := strings.TrimSpace(os.Getenv("STREAM_POLL_INTERVAL")); value != "" {
@@ -53,11 +62,21 @@ func Load() (Config, error) {
 		streamPollInterval = parsed
 	}
 
+	// Admin Portal Config
+	adminHostname := strings.TrimSpace(os.Getenv("ADMIN_HOSTNAME"))
+	if adminHostname != "" && sessionSecret == "" {
+		return Config{}, errors.New("SESSION_SECRET is required when ADMIN_HOSTNAME is set")
+	}
+
 	return Config{
 		DatabaseURL:        databaseURL,
 		HTTPAddr:           envOrDefault("HTTP_ADDR", defaultHTTPAddr),
 		GRPCAddr:           envOrDefault("GRPC_ADDR", defaultGRPCAddr),
 		StreamPollInterval: streamPollInterval,
+		AdminHostname:      adminHostname, // Default to empty (disabled)
+		TSAuthKey:          os.Getenv("TS_AUTH_KEY"),
+		TSStateDir:         envOrDefault("TS_STATE_DIR", "tsnet-state"),
+		SessionSecret:      sessionSecret,
 	}, nil
 }
 
