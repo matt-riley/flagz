@@ -428,14 +428,20 @@ func (s *HTTPServer) handleListAuditLog(w http.ResponseWriter, r *http.Request) 
 	limit := 50
 	offset := 0
 	if v := r.URL.Query().Get("limit"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= 1000 {
-			limit = parsed
+		parsed, err := strconv.Atoi(v)
+		if err != nil || parsed <= 0 || parsed > 1000 {
+			writeJSONError(w, http.StatusBadRequest, "invalid limit parameter")
+			return
 		}
+		limit = parsed
 	}
 	if v := r.URL.Query().Get("offset"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
-			offset = parsed
+		parsed, err := strconv.Atoi(v)
+		if err != nil || parsed < 0 {
+			writeJSONError(w, http.StatusBadRequest, "invalid offset parameter")
+			return
 		}
+		offset = parsed
 	}
 
 	entries, err := s.service.ListAuditLog(r.Context(), projectID, limit, offset)

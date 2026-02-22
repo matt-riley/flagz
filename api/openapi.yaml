@@ -185,6 +185,46 @@ components:
       example:
         error: key is required
 
+    AuditLogEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Unique audit log entry ID.
+        project_id:
+          type: string
+          description: The project this entry belongs to.
+        api_key_id:
+          type: string
+          description: The API key that performed the action.
+        admin_user_id:
+          type: string
+          description: The admin user that performed the action.
+        action:
+          type: string
+          description: The mutation action (create, update, delete).
+          example: create
+        flag_key:
+          type: string
+          description: The flag key affected.
+          example: dark-mode
+        details:
+          type: object
+          description: Optional additional details about the action.
+        created_at:
+          type: string
+          format: date-time
+          description: When the action occurred.
+
+  responses:
+    Unauthorized:
+      description: Unauthorized. Did you forget your token?
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
 security:
   - bearerAuth: []
 
@@ -429,6 +469,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+
+  /v1/audit-log:
+    get:
+      summary: List audit log entries
+      description: Returns audit log entries for the authenticated project, ordered newest first.
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 1000
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: List of audit log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditLogEntry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /healthz:
     get:

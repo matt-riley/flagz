@@ -541,9 +541,6 @@ func TestServiceAuditLogRecordedOnMutations(t *testing.T) {
 		t.Fatalf("DeleteFlag() error = %v", err)
 	}
 
-	// Give best-effort goroutines time to complete.
-	time.Sleep(100 * time.Millisecond)
-
 	repo.mu.RLock()
 	defer repo.mu.RUnlock()
 

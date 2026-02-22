@@ -213,7 +213,7 @@ func (s *Service) CreateFlag(ctx context.Context, flag repository.Flag) (reposit
 
 	s.setCachedFlag(created)
 	s.publishFlagEventBestEffort(ctx, EventTypeUpdated, created)
-	s.insertAuditLogBestEffort(ctx, "create", created.Key)
+	s.insertAuditLogBestEffort(ctx, created.ProjectID, "create", created.Key)
 
 	return created, nil
 }
@@ -246,7 +246,7 @@ func (s *Service) UpdateFlag(ctx context.Context, flag repository.Flag) (reposit
 
 	s.setCachedFlag(updated)
 	s.publishFlagEventBestEffort(ctx, EventTypeUpdated, updated)
-	s.insertAuditLogBestEffort(ctx, "update", updated.Key)
+	s.insertAuditLogBestEffort(ctx, updated.ProjectID, "update", updated.Key)
 
 	return updated, nil
 }
@@ -322,7 +322,7 @@ func (s *Service) DeleteFlag(ctx context.Context, projectID, key string) error {
 
 	s.deleteCachedFlag(projectID, key)
 	s.publishFlagEventBestEffort(ctx, EventTypeDeleted, existing)
-	s.insertAuditLogBestEffort(ctx, "delete", existing.Key)
+	s.insertAuditLogBestEffort(ctx, projectID, "delete", existing.Key)
 
 	return nil
 }
@@ -595,8 +595,7 @@ func (s *Service) ListAuditLog(ctx context.Context, projectID string, limit, off
 	return s.repo.ListAuditLog(ctx, projectID, limit, offset)
 }
 
-func (s *Service) insertAuditLogBestEffort(ctx context.Context, action, flagKey string) {
-	projectID, _ := middleware.ProjectIDFromContext(ctx)
+func (s *Service) insertAuditLogBestEffort(ctx context.Context, projectID, action, flagKey string) {
 	apiKeyID, _ := middleware.APIKeyIDFromContext(ctx)
 	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), bestEffortTimeout)
 	defer cancel()
