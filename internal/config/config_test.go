@@ -126,6 +126,49 @@ func TestLoad_CustomStreamPollInterval(t *testing.T) {
 	}
 }
 
+func TestLoad_CustomAuthRateLimit(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("AUTH_RATE_LIMIT", "25")
+	t.Setenv("ADMIN_HOSTNAME", "")
+	t.Setenv("SESSION_SECRET", "")
+	t.Setenv("STREAM_POLL_INTERVAL", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.AuthRateLimit != 25 {
+		t.Errorf("AuthRateLimit = %d, want 25", cfg.AuthRateLimit)
+	}
+}
+
+func TestLoad_AuthRateLimit_Invalid(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("AUTH_RATE_LIMIT", "not-a-number")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() should fail for non-numeric AUTH_RATE_LIMIT")
+	}
+}
+
+func TestLoad_AuthRateLimit_Zero(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("AUTH_RATE_LIMIT", "0")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() should fail for zero AUTH_RATE_LIMIT")
+	}
+}
+
+func TestLoad_AuthRateLimit_Negative(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("AUTH_RATE_LIMIT", "-5")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() should fail for negative AUTH_RATE_LIMIT")
+	}
+}
+
 func TestEnvOrDefault_EmptyReturnsDefault(t *testing.T) {
 	t.Setenv("TEST_KEY", "")
 	got := envOrDefault("TEST_KEY", "fallback")

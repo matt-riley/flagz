@@ -51,20 +51,18 @@ o(&cfg)
 }
 return func(next http.Handler) http.Handler {
 return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-if cfg.rateLimiter != nil {
-ip := ExtractIP(r.RemoteAddr)
-if !cfg.rateLimiter.Allow(ip) {
-http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
-return
-}
-}
 projectID, err := authorizeHTTP(r.Context(), r.Header.Get("Authorization"), validator)
 if err != nil {
 if cfg.onFailure != nil {
 cfg.onFailure()
 }
 if cfg.rateLimiter != nil {
-cfg.rateLimiter.RecordFailure(ExtractIP(r.RemoteAddr))
+ip := ExtractIP(r.RemoteAddr)
+if !cfg.rateLimiter.Allow(ip) {
+http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
+return
+}
+cfg.rateLimiter.RecordFailure(ip)
 }
 writeHTTPUnauthorized(w)
 return
@@ -85,12 +83,6 @@ for _, o := range opts {
 o(&cfg)
 }
 return func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-if cfg.rateLimiter != nil {
-ip := extractGRPCPeerIP(ctx)
-if ip != "" && !cfg.rateLimiter.Allow(ip) {
-return nil, status.Error(codes.ResourceExhausted, "too many failed auth attempts")
-}
-}
 projectID, err := authorizeGRPC(ctx, validator)
 if err != nil {
 if cfg.onFailure != nil {
@@ -98,6 +90,9 @@ cfg.onFailure()
 }
 if cfg.rateLimiter != nil {
 if ip := extractGRPCPeerIP(ctx); ip != "" {
+if !cfg.rateLimiter.Allow(ip) {
+return nil, status.Error(codes.ResourceExhausted, "too many failed auth attempts")
+}
 cfg.rateLimiter.RecordFailure(ip)
 }
 }
@@ -119,12 +114,6 @@ o(&cfg)
 }
 return func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 ctx := ss.Context()
-if cfg.rateLimiter != nil {
-ip := extractGRPCPeerIP(ctx)
-if ip != "" && !cfg.rateLimiter.Allow(ip) {
-return status.Error(codes.ResourceExhausted, "too many failed auth attempts")
-}
-}
 projectID, err := authorizeGRPC(ctx, validator)
 if err != nil {
 if cfg.onFailure != nil {
@@ -132,6 +121,9 @@ cfg.onFailure()
 }
 if cfg.rateLimiter != nil {
 if ip := extractGRPCPeerIP(ctx); ip != "" {
+if !cfg.rateLimiter.Allow(ip) {
+return status.Error(codes.ResourceExhausted, "too many failed auth attempts")
+}
 cfg.rateLimiter.RecordFailure(ip)
 }
 }
@@ -236,7 +228,7 @@ continue
 projectID, err := validator.ValidateToken(ctx, token)
 if err == nil {
 if strings.TrimSpace(projectID) == "" {
-continue
+return "", errInvalidAuthorizationHeader
 }
 return projectID, nil
 }
