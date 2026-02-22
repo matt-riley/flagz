@@ -316,6 +316,10 @@ func (s *HTTPServer) handleEvaluate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	for _, result := range results {
+		s.metrics.RecordEvaluation(result.Value)
+	}
+
 	writeJSON(w, http.StatusOK, evaluateJSONResponse{Results: results})
 }
 

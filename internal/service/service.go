@@ -82,10 +82,13 @@ type ResolveResult struct {
 // boolean evaluation, event streaming, and an in-memory cache of all flags.
 // All exported methods are safe for concurrent use.
 type Service struct {
-	repo  Repository
-	log   *slog.Logger
-	mu    sync.RWMutex
-	cache map[string]map[string]repository.Flag // map[projectID]map[key]Flag
+	repo            Repository
+	log             *slog.Logger
+	mu              sync.RWMutex
+	cache           map[string]map[string]repository.Flag // map[projectID]map[key]Flag
+	onCacheLoad     func()
+	onInvalidation  func()
+	onCacheUpdate   func(projectID string, size float64)
 }
 
 // Option configures optional [Service] parameters.
@@ -100,6 +103,17 @@ func WithLogger(log *slog.Logger) Option {
 			return
 		}
 		s.log = log
+	}
+}
+
+// WithCacheMetrics registers callbacks invoked on cache operations, allowing
+// Prometheus (or any other) instrumentation without importing the metrics
+// package.
+func WithCacheMetrics(onLoad, onInvalidation func(), onCacheUpdate func(projectID string, size float64)) Option {
+	return func(s *Service) {
+		s.onCacheLoad = onLoad
+		s.onInvalidation = onInvalidation
+		s.onCacheUpdate = onCacheUpdate
 	}
 }
 
@@ -155,6 +169,15 @@ func (s *Service) LoadCache(ctx context.Context) error {
 	s.mu.Lock()
 	s.cache = next
 	s.mu.Unlock()
+
+	if s.onCacheLoad != nil {
+		s.onCacheLoad()
+	}
+	if s.onCacheUpdate != nil {
+		for pid, m := range next {
+			s.onCacheUpdate(pid, float64(len(m)))
+		}
+	}
 
 	return nil
 }
@@ -448,6 +471,9 @@ func (s *Service) startCacheInvalidationListener(ctx context.Context, subscriber
 					continue
 				}
 				s.log.Debug("cache invalidation received")
+				if s.onInvalidation != nil {
+					s.onInvalidation()
+				}
 				s.reloadCache(ctx)
 			}
 		}

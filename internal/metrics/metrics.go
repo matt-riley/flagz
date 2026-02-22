@@ -5,10 +5,16 @@
 package metrics
 
 import (
+	"context"
 	"net/http"
+	"path"
+	"strconv"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
 )
 
 // Metrics holds all Prometheus collectors used by the flagz server.
@@ -29,12 +35,6 @@ type Metrics struct {
 	DBPoolIdle           prometheus.Gauge
 	DBPoolTotal          prometheus.Gauge
 }
-
-// Metrics are defined upfront as part of the custom registry. Some metrics
-// (e.g., gRPC, cache, evaluation, auth, DB pool) are instrumented by
-// subsequent phases that add the corresponding middleware and hooks.
-// Defining them here ensures the registry is complete and /metrics always
-// exposes a consistent set of metric names.
 
 // New creates and registers all flagz metrics in a fresh registry.
 func New() *Metrics {
@@ -133,4 +133,70 @@ func New() *Metrics {
 // Handler returns an [http.Handler] that serves Prometheus metrics.
 func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.Registry, promhttp.HandlerOpts{})
+}
+
+// UnaryServerInterceptor returns a gRPC unary interceptor that records
+// request count and latency for each method.
+func (m *Metrics) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		start := time.Now()
+		resp, err := handler(ctx, req)
+		method := path.Base(info.FullMethod)
+		st, _ := status.FromError(err)
+		code := st.Code().String()
+		m.GRPCRequestsTotal.WithLabelValues(method, code).Inc()
+		m.GRPCRequestDuration.WithLabelValues(method, code).Observe(time.Since(start).Seconds())
+		return resp, err
+	}
+}
+
+// StreamServerInterceptor returns a gRPC stream interceptor that records
+// request count, latency, and active stream gauge.
+func (m *Metrics) StreamServerInterceptor() grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		m.ActiveStreams.WithLabelValues("grpc").Inc()
+		defer m.ActiveStreams.WithLabelValues("grpc").Dec()
+		start := time.Now()
+		err := handler(srv, ss)
+		method := path.Base(info.FullMethod)
+		st, _ := status.FromError(err)
+		code := st.Code().String()
+		m.GRPCRequestsTotal.WithLabelValues(method, code).Inc()
+		m.GRPCRequestDuration.WithLabelValues(method, code).Observe(time.Since(start).Seconds())
+		return err
+	}
+}
+
+// RecordEvaluation increments the evaluation counter with the given result.
+func (m *Metrics) RecordEvaluation(result bool) {
+	m.EvaluationsTotal.WithLabelValues(strconv.FormatBool(result)).Inc()
+}
+
+// SetCacheSize updates the cache size gauge for the given project.
+func (m *Metrics) SetCacheSize(projectID string, size float64) {
+	m.CacheSize.WithLabelValues(projectID).Set(size)
+}
+
+// IncCacheLoads increments the cache load counter.
+func (m *Metrics) IncCacheLoads() {
+	m.CacheLoadsTotal.Inc()
+}
+
+// IncCacheInvalidations increments the cache invalidation counter.
+func (m *Metrics) IncCacheInvalidations() {
+	m.CacheInvalidations.Inc()
+}
+
+// DBPoolStats holds connection pool statistics for metric updates.
+type DBPoolStats struct {
+	Acquired float64
+	Idle     float64
+	Total    float64
+}
+
+// SetDBPoolStats updates the DB pool gauges.
+func (m *Metrics) SetDBPoolStats(stats DBPoolStats) {
+	m.DBPoolAcquired.Set(stats.Acquired)
+	m.DBPoolIdle.Set(stats.Idle)
+	m.DBPoolTotal.Set(stats.Total)
 }

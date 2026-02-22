@@ -10,6 +10,7 @@ import (
 
 	flagspb "github.com/matt-riley/flagz/api/proto/v1"
 	"github.com/matt-riley/flagz/internal/core"
+	"github.com/matt-riley/flagz/internal/metrics"
 	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 	"github.com/matt-riley/flagz/internal/service"
@@ -24,18 +25,25 @@ const defaultGRPCStreamPollInterval = time.Second
 type GRPCServer struct {
 	flagspb.UnimplementedFlagServiceServer
 	service            Service
+	metrics            *metrics.Metrics
 	streamPollInterval time.Duration
 }
 
 // NewGRPCServer creates a [GRPCServer] with a default stream poll interval of
 // 1 second.
 func NewGRPCServer(svc Service) *GRPCServer {
-	return NewGRPCServerWithStreamPollInterval(svc, defaultGRPCStreamPollInterval)
+	return NewGRPCServerWithOptions(svc, defaultGRPCStreamPollInterval, nil)
 }
 
 // NewGRPCServerWithStreamPollInterval creates a [GRPCServer] with the specified
 // poll interval for the WatchFlag streaming RPC.
 func NewGRPCServerWithStreamPollInterval(svc Service, streamPollInterval time.Duration) *GRPCServer {
+	return NewGRPCServerWithOptions(svc, streamPollInterval, nil)
+}
+
+// NewGRPCServerWithOptions creates a [GRPCServer] with the specified poll
+// interval and metrics. If m is nil, a default [metrics.Metrics] is created.
+func NewGRPCServerWithOptions(svc Service, streamPollInterval time.Duration, m *metrics.Metrics) *GRPCServer {
 	if svc == nil {
 		panic("service is nil")
 	}
@@ -44,8 +52,13 @@ func NewGRPCServerWithStreamPollInterval(svc Service, streamPollInterval time.Du
 		streamPollInterval = defaultGRPCStreamPollInterval
 	}
 
+	if m == nil {
+		m = metrics.New()
+	}
+
 	return &GRPCServer{
 		service:            svc,
+		metrics:            m,
 		streamPollInterval: streamPollInterval,
 	}
 }
@@ -204,6 +217,8 @@ func (s *GRPCServer) ResolveBoolean(ctx context.Context, req *flagspb.ResolveBoo
 		return nil, toGRPCError(err)
 	}
 
+	s.metrics.RecordEvaluation(value)
+
 	return &flagspb.ResolveBooleanResponse{
 		Key:   req.GetKey(),
 		Value: value,
@@ -246,6 +261,7 @@ func (s *GRPCServer) ResolveBatch(ctx context.Context, req *flagspb.ResolveBatch
 
 	protoResults := make([]*flagspb.ResolveBatchResult, 0, len(results))
 	for _, result := range results {
+		s.metrics.RecordEvaluation(result.Value)
 		protoResults = append(protoResults, &flagspb.ResolveBatchResult{
 			Key:   result.Key,
 			Value: result.Value,
