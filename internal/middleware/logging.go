@@ -36,12 +36,12 @@ func LoggerFromContext(ctx context.Context) *slog.Logger {
 }
 
 func generateRequestID() string {
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
 		// Fallback to time-based ID if crypto/rand fails
 		return fmt.Sprintf("%016x", time.Now().UnixNano())
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b[:])
 }
 
 // responseWriter wraps http.ResponseWriter to capture the status code.
@@ -66,13 +66,6 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 		rw.written = true
 	}
 	return rw.ResponseWriter.Write(b)
-}
-
-// Flush implements http.Flusher by delegating to the underlying writer if supported.
-func (rw *responseWriter) Flush() {
-	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
 }
 
 // Unwrap supports http.ResponseController and middleware that unwrap writers.
@@ -139,7 +132,7 @@ func UnaryRequestLoggingInterceptor(logger *slog.Logger) grpc.UnaryServerInterce
 		code := status.Code(err)
 		reqLogger.InfoContext(ctx, "request completed",
 			slog.String("method", info.FullMethod),
-			slog.String("status_code", code.String()),
+			slog.Int("status_code", int(code)),
 			slog.Float64("duration_ms", float64(duration.Nanoseconds())/1e6),
 		)
 
@@ -181,7 +174,7 @@ func StreamRequestLoggingInterceptor(logger *slog.Logger) grpc.StreamServerInter
 		code := status.Code(err)
 		reqLogger.InfoContext(ctx, "stream completed",
 			slog.String("method", info.FullMethod),
-			slog.String("status_code", code.String()),
+			slog.Int("status_code", int(code)),
 			slog.Float64("duration_ms", float64(duration.Nanoseconds())/1e6),
 		)
 

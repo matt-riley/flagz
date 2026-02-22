@@ -165,8 +165,8 @@ func TestUnaryRequestLoggingInterceptor(t *testing.T) {
 		if !strings.Contains(output, "/flagz.v1.FlagService/GetFlag") {
 			t.Fatalf("expected method in log output, got: %s", output)
 		}
-		if !strings.Contains(output, "status_code=OK") {
-			t.Fatalf("expected status_code=OK in log output, got: %s", output)
+		if !strings.Contains(output, "status_code=0") {
+			t.Fatalf("expected status_code=0 in log output, got: %s", output)
 		}
 		if !strings.Contains(output, "duration_ms=") {
 			t.Fatalf("expected duration_ms in log output, got: %s", output)
@@ -187,8 +187,8 @@ func TestUnaryRequestLoggingInterceptor(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error")
 		}
-		if !strings.Contains(buf.String(), "status_code=NotFound") {
-			t.Fatalf("expected status_code=NotFound in log output, got: %s", buf.String())
+		if !strings.Contains(buf.String(), "status_code=5") {
+			t.Fatalf("expected status_code=5 in log output, got: %s", buf.String())
 		}
 	})
 
@@ -304,8 +304,8 @@ func TestStreamRequestLoggingInterceptor(t *testing.T) {
 		if !strings.Contains(output, "/flagz.v1.FlagService/WatchFlag") {
 			t.Fatalf("expected method in log output, got: %s", output)
 		}
-		if !strings.Contains(output, "status_code=OK") {
-			t.Fatalf("expected status_code=OK in log output, got: %s", output)
+		if !strings.Contains(output, "status_code=0") {
+			t.Fatalf("expected status_code=0 in log output, got: %s", output)
 		}
 	})
 
@@ -324,8 +324,8 @@ func TestStreamRequestLoggingInterceptor(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error")
 		}
-		if !strings.Contains(buf.String(), "status_code=Internal") {
-			t.Fatalf("expected status_code=Internal in log output, got: %s", buf.String())
+		if !strings.Contains(buf.String(), "status_code=13") {
+			t.Fatalf("expected status_code=13 in log output, got: %s", buf.String())
 		}
 	})
 
