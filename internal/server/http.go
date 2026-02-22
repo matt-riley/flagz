@@ -392,6 +392,8 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrInvalidRules), errors.Is(err, service.ErrInvalidVariants):
 		writeJSONError(w, http.StatusBadRequest, serviceErrorMessage(err))
+	case errors.Is(err, service.ErrFlagKeyRequired), errors.Is(err, service.ErrProjectIDRequired):
+		writeJSONError(w, http.StatusBadRequest, serviceErrorMessage(err))
 	case errors.Is(err, service.ErrFlagNotFound):
 		writeJSONError(w, http.StatusNotFound, serviceErrorMessage(err))
 	case errors.Is(err, context.Canceled):
@@ -407,6 +409,10 @@ func serviceErrorMessage(err error) string {
 		return "invalid rules"
 	case errors.Is(err, service.ErrInvalidVariants):
 		return "invalid variants"
+	case errors.Is(err, service.ErrFlagKeyRequired):
+		return "flag key is required"
+	case errors.Is(err, service.ErrProjectIDRequired):
+		return "project ID is required"
 	case errors.Is(err, service.ErrFlagNotFound):
 		return "flag not found"
 	case errors.Is(err, context.Canceled):

@@ -39,6 +39,10 @@ var (
 	ErrInvalidRules = errors.New("invalid rules")
 	// ErrInvalidVariants is returned when flag variants JSON is malformed.
 	ErrInvalidVariants = errors.New("invalid variants")
+	// ErrFlagKeyRequired is returned when a flag key is empty or blank.
+	ErrFlagKeyRequired = errors.New("flag key is required")
+	// ErrProjectIDRequired is returned when a project ID is empty or blank.
+	ErrProjectIDRequired = errors.New("project ID is required")
 )
 
 // Repository defines the persistence operations required by [Service].
@@ -135,10 +139,10 @@ func (s *Service) LoadCache(ctx context.Context) error {
 // publishes an "updated" event on a best-effort basis.
 func (s *Service) CreateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error) {
 	if strings.TrimSpace(flag.Key) == "" {
-		return repository.Flag{}, errors.New("flag key is required")
+		return repository.Flag{}, ErrFlagKeyRequired
 	}
 	if strings.TrimSpace(flag.ProjectID) == "" {
-		return repository.Flag{}, errors.New("project ID is required")
+		return repository.Flag{}, ErrProjectIDRequired
 	}
 	if _, err := parseRulesJSON(flag.Rules); err != nil {
 		return repository.Flag{}, err
@@ -163,10 +167,10 @@ func (s *Service) CreateFlag(ctx context.Context, flag repository.Flag) (reposit
 // updated and an "updated" event is published.
 func (s *Service) UpdateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error) {
 	if strings.TrimSpace(flag.Key) == "" {
-		return repository.Flag{}, errors.New("flag key is required")
+		return repository.Flag{}, ErrFlagKeyRequired
 	}
 	if strings.TrimSpace(flag.ProjectID) == "" {
-		return repository.Flag{}, errors.New("project ID is required")
+		return repository.Flag{}, ErrProjectIDRequired
 	}
 	if _, err := parseRulesJSON(flag.Rules); err != nil {
 		return repository.Flag{}, err
@@ -195,10 +199,10 @@ func (s *Service) UpdateFlag(ctx context.Context, flag repository.Flag) (reposit
 // if the flag does not exist.
 func (s *Service) GetFlag(ctx context.Context, projectID, key string) (repository.Flag, error) {
 	if strings.TrimSpace(key) == "" {
-		return repository.Flag{}, errors.New("flag key is required")
+		return repository.Flag{}, ErrFlagKeyRequired
 	}
 	if strings.TrimSpace(projectID) == "" {
-		return repository.Flag{}, errors.New("project ID is required")
+		return repository.Flag{}, ErrProjectIDRequired
 	}
 
 	if flag, ok := s.getCachedFlag(projectID, key); ok {
@@ -305,7 +309,7 @@ func (s *Service) ResolveBatch(ctx context.Context, requests []ResolveRequest) (
 // streaming consumers to poll for updates.
 func (s *Service) ListEventsSince(ctx context.Context, projectID string, eventID int64) ([]repository.FlagEvent, error) {
 	if strings.TrimSpace(projectID) == "" {
-		return nil, errors.New("project ID is required")
+		return nil, ErrProjectIDRequired
 	}
 	events, err := s.repo.ListEventsSince(ctx, projectID, eventID)
 	if err != nil {
@@ -319,10 +323,10 @@ func (s *Service) ListEventsSince(ctx context.Context, projectID string, eventID
 // than eventID, enabling per-flag streaming in gRPC WatchFlag.
 func (s *Service) ListEventsSinceForKey(ctx context.Context, projectID string, eventID int64, key string) ([]repository.FlagEvent, error) {
 	if strings.TrimSpace(projectID) == "" {
-		return nil, errors.New("project ID is required")
+		return nil, ErrProjectIDRequired
 	}
 	if strings.TrimSpace(key) == "" {
-		return nil, errors.New("flag key is required")
+		return nil, ErrFlagKeyRequired
 	}
 
 	events, err := s.repo.ListEventsSinceForKey(ctx, projectID, eventID, key)

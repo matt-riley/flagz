@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"testing"
 	"time"
@@ -51,7 +50,7 @@ func TestGRPCServerCreateFlag(t *testing.T) {
 	t.Run("maps validation errors to invalid argument", func(t *testing.T) {
 		svc := &fakeService{
 			createFlagFunc: func(_ context.Context, _ repository.Flag) (repository.Flag, error) {
-				return repository.Flag{}, errors.New("flag key is required")
+				return repository.Flag{}, service.ErrFlagKeyRequired
 			},
 		}
 		grpcServer := NewGRPCServer(svc)

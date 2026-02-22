@@ -335,7 +335,9 @@ func toGRPCError(err error) error {
 		return status.Error(codes.InvalidArgument, "invalid rules")
 	case errors.Is(err, service.ErrInvalidVariants):
 		return status.Error(codes.InvalidArgument, "invalid variants")
-	case isInvalidArgumentError(err):
+	case errors.Is(err, service.ErrFlagKeyRequired):
+		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, service.ErrProjectIDRequired):
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, service.ErrFlagNotFound):
 		return status.Error(codes.NotFound, "flag not found")
@@ -346,15 +348,6 @@ func toGRPCError(err error) error {
 	default:
 		return status.Error(codes.Internal, "internal server error")
 	}
-}
-
-func isInvalidArgumentError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.TrimSpace(err.Error())
-	return strings.EqualFold(msg, "flag key is required") ||
-		strings.EqualFold(msg, "project ID is required")
 }
 
 func parseListPageToken(pageToken string, maxOffset int) (int, error) {

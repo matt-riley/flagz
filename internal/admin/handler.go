@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
+	"html/template"
 	"log"
 	"net"
 	"net/http"
@@ -115,13 +116,14 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == "GET" {
 		csrfToken := h.generateCSRFToken()
+		isSecure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 		http.SetCookie(w, &http.Cookie{
 			Name:     "flagz_csrf",
 			Value:    csrfToken,
 			Path:     "/",
 			HttpOnly: true,
 			SameSite: http.SameSiteStrictMode,
-			Secure:   true,
+			Secure:   isSecure,
 		})
 		Render(w, "setup.html", map[string]any{
 			"CSRFToken": csrfToken,
@@ -178,13 +180,14 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
 		csrfToken := h.generateCSRFToken()
+		isSecure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 		http.SetCookie(w, &http.Cookie{
 			Name:     "flagz_csrf",
 			Value:    csrfToken,
 			Path:     "/",
 			HttpOnly: true,
 			SameSite: http.SameSiteStrictMode,
-			Secure:   true,
+			Secure:   isSecure,
 		})
 		Render(w, "login.html", map[string]any{
 			"CSRFToken": csrfToken,
@@ -386,7 +389,7 @@ func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *r
 			return
 		}
 
-		// Render just the row if HTMX request
+		// Render just the button if HTMX request
 		if r.Header.Get("HX-Request") == "true" {
 			colorClass := "bg-red-100 text-red-800"
 			text := "Disabled"
@@ -394,12 +397,20 @@ func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *r
 				colorClass = "bg-green-100 text-green-800"
 				text = "Enabled"
 			}
-			
-			html := fmt.Sprintf(`<button hx-post="/projects/%s/flags/%s/toggle" hx-vals='{"csrf_token": "%s"}' hx-target="this" hx-swap="outerHTML" class="%s px-2 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer">%s</button>`,
-				project.ID, flagKey, r.FormValue("csrf_token"), colorClass, text)
-			
+
+			tmpl := template.Must(template.New("toggle").Parse(
+				`<button hx-post="/projects/{{.ProjectID}}/flags/{{.FlagKey}}/toggle" ` +
+					`hx-vals='{"csrf_token": "{{.CSRFToken}}"}' hx-target="this" hx-swap="outerHTML" ` +
+					`class="{{.ColorClass}} px-2 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer">{{.Text}}</button>`))
+
 			w.Header().Set("Content-Type", "text/html")
-			w.Write([]byte(html))
+			tmpl.Execute(w, map[string]string{
+				"ProjectID":  project.ID,
+				"FlagKey":    flagKey,
+				"CSRFToken":  r.FormValue("csrf_token"),
+				"ColorClass": colorClass,
+				"Text":       text,
+			})
 			return
 		}
 
@@ -425,7 +436,9 @@ func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *r
 
 func (h *Handler) generateCSRFToken() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("failed to generate CSRF token: " + err.Error())
+	}
 	return hex.EncodeToString(b)
 }
 
