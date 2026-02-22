@@ -310,8 +310,8 @@ func (s *Service) GetFlag(ctx context.Context, projectID, key string) (repositor
 }
 
 // ListFlags returns all flags for a given project from the in-memory cache, sorted by key.
-func (s *Service) ListFlags(_ context.Context, projectID string) ([]repository.Flag, error) {
-	_, span := svcTracer.Start(context.Background(), "service.ListFlags")
+func (s *Service) ListFlags(ctx context.Context, projectID string) ([]repository.Flag, error) {
+	ctx, span := svcTracer.Start(ctx, "service.ListFlags")
 	defer span.End()
 	span.SetAttributes(attribute.String("project_id", projectID))
 

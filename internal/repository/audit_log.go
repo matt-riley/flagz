@@ -18,6 +18,9 @@ type AuditLogEntry struct {
 	CreatedAt   time.Time       `json:"created_at"`
 }
 
+// Note: The audit_log table is created by migration 0004_audit_log
+// (phase-4.3/audit-logging branch).
+
 // InsertAuditLog writes a single audit log entry.
 func (r *PostgresRepository) InsertAuditLog(ctx context.Context, entry AuditLogEntry) error {
 	_, err := r.pool.Exec(ctx,
