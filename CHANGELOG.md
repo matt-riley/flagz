@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0](https://github.com/matt-riley/flagz/compare/v1.1.1...v1.2.0) (2026-02-22)
+
+
+### Features
+
+* Admin Portal & Multi-Tenancy Support ([#25](https://github.com/matt-riley/flagz/issues/25)) ([35bcf62](https://github.com/matt-riley/flagz/commit/35bcf6271af0bf96856fd2a46c14abe7ca366d41))
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/matt-riley/flagz to v1.1.1 ([#24](https://github.com/matt-riley/flagz/issues/24)) ([2522589](https://github.com/matt-riley/flagz/commit/252258986c5b6d4226220226f59650c669855c9d))
+
 ## [1.1.1](https://github.com/matt-riley/flagz/compare/v1.1.0...v1.1.1) (2026-02-21)
 
 
