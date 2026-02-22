@@ -13,7 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -26,6 +26,7 @@ import (
 	flagspb "github.com/matt-riley/flagz/api/proto/v1"
 	"github.com/matt-riley/flagz/internal/admin"
 	"github.com/matt-riley/flagz/internal/config"
+	"github.com/matt-riley/flagz/internal/logging"
 	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 	"github.com/matt-riley/flagz/internal/server"
@@ -43,7 +44,7 @@ const (
 
 func main() {
 	if err := run(); err != nil {
-		log.Printf("server failed: %v", err)
+		slog.Error("server failed", "error", err)
 		os.Exit(1)
 	}
 }
@@ -55,6 +56,9 @@ func run() error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
+	log := logging.New(cfg.LogLevel)
+	slog.SetDefault(log)
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -65,7 +69,7 @@ func run() error {
 	defer pool.Close()
 
 	repo := repository.NewPostgresRepository(pool)
-	svc, err := service.New(ctx, repo)
+	svc, err := service.New(ctx, repo, service.WithLogger(log))
 	if err != nil {
 		return fmt.Errorf("init service: %w", err)
 	}
@@ -108,14 +112,14 @@ func run() error {
 			Hostname: cfg.AdminHostname,
 			AuthKey:  cfg.TSAuthKey,
 			Dir:      dir,
-			Logf:     func(format string, args ...any) { log.Printf("[tailscale] "+format, args...) },
+			Logf:     func(format string, args ...any) { log.Debug(fmt.Sprintf(format, args...), "component", "tailscale") },
 		}
 
 		// Create admin session manager
 		sessionMgr := admin.NewSessionManager(ctx, repo, cfg.SessionSecret)
 
 		// Create admin handler
-		adminHandler := admin.NewHandler(repo, svc, sessionMgr, cfg.AdminHostname)
+		adminHandler := admin.NewHandler(repo, svc, sessionMgr, cfg.AdminHostname, log)
 
 		// Listen on tailnet
 		var err error
@@ -123,7 +127,7 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("listen tailnet: %w", err)
 		}
-		log.Printf("Admin portal listening on http://%s (Tailscale)", cfg.AdminHostname)
+		log.Info("admin portal listening", "hostname", cfg.AdminHostname, "transport", "tailscale")
 
 		adminServer := &http.Server{Handler: adminHandler}
 		go func() {
@@ -131,12 +135,12 @@ func run() error {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 			defer cancel()
 			if err := adminServer.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Printf("admin server shutdown: %v", err)
+				log.Error("admin server shutdown error", "error", err)
 			}
 		}()
 		go func() {
 			if err := adminServer.Serve(adminLis); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Printf("Admin server error: %v", err)
+				log.Error("admin server error", "error", err)
 			}
 		}()
 	}
@@ -165,12 +169,16 @@ func run() error {
 		}
 	}()
 
+	log.Info("server started", "http_addr", cfg.HTTPAddr, "grpc_addr", cfg.GRPCAddr)
+
 	var serveErr error
 	select {
 	case <-ctx.Done():
 	case serveErr = <-serveErrCh:
 	}
 	stop()
+
+	log.Info("server shutting down")
 
 	httpShutdownCtx, cancelHTTP := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancelHTTP()

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -82,30 +83,47 @@ type ResolveResult struct {
 // All exported methods are safe for concurrent use.
 type Service struct {
 	repo  Repository
+	log   *slog.Logger
 	mu    sync.RWMutex
 	cache map[string]map[string]repository.Flag // map[projectID]map[key]Flag
+}
+
+// Option configures optional [Service] parameters.
+type Option func(*Service)
+
+// WithLogger sets the structured logger used by [Service]. When omitted,
+// [slog.Default] is used.
+func WithLogger(log *slog.Logger) Option {
+	return func(s *Service) { s.log = log }
 }
 
 // New creates a [Service], eagerly loading the flag cache from the repository.
 // If the repository implements cache invalidation subscriptions, a background
 // listener is started to keep the cache fresh.
-func New(ctx context.Context, repo Repository) (*Service, error) {
+func New(ctx context.Context, repo Repository, opts ...Option) (*Service, error) {
 	if repo == nil {
 		return nil, errors.New("repository is nil")
 	}
 
 	svc := &Service{
 		repo:  repo,
+		log:   slog.Default(),
 		cache: make(map[string]map[string]repository.Flag),
+	}
+	for _, opt := range opts {
+		opt(svc)
 	}
 
 	if err := svc.LoadCache(ctx); err != nil {
 		return nil, err
 	}
+	svc.log.Info("flag cache loaded", "flags", svc.cacheSize())
+
 	if subscriber, ok := repo.(cacheInvalidationSubscriber); ok {
 		if err := svc.startCacheInvalidationListener(ctx, subscriber); err != nil {
 			return nil, err
 		}
+		svc.log.Info("cache invalidation listener started")
 	}
 
 	return svc, nil
@@ -375,6 +393,17 @@ func (s *Service) deleteCachedFlag(projectID, key string) {
 	}
 }
 
+func (s *Service) cacheSize() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	n := 0
+	for _, m := range s.cache {
+		n += len(m)
+	}
+	return n
+}
+
 func (s *Service) startCacheInvalidationListener(ctx context.Context, subscriber cacheInvalidationSubscriber) error {
 	invalidations, err := subscriber.SubscribeFlagInvalidation(ctx)
 	if err != nil {
@@ -394,6 +423,9 @@ func (s *Service) startCacheInvalidationListener(ctx context.Context, subscriber
 					next, err := subscriber.SubscribeFlagInvalidation(ctx)
 					if err == nil {
 						invalidations = next
+						s.log.Info("cache invalidation resubscribed")
+					} else {
+						s.log.Warn("cache invalidation resubscribe failed", "error", err)
 					}
 				}
 				s.reloadCache(ctx)
@@ -401,12 +433,15 @@ func (s *Service) startCacheInvalidationListener(ctx context.Context, subscriber
 				if !ok {
 					next, err := subscriber.SubscribeFlagInvalidation(ctx)
 					if err != nil {
+						s.log.Warn("cache invalidation channel closed, resubscribe failed", "error", err)
 						invalidations = nil
 						continue
 					}
 					invalidations = next
+					s.log.Info("cache invalidation resubscribed after channel close")
 					continue
 				}
+				s.log.Debug("cache invalidation received")
 				s.reloadCache(ctx)
 			}
 		}
@@ -425,7 +460,11 @@ func (s *Service) publishFlagEventBestEffort(ctx context.Context, eventType stri
 func (s *Service) reloadCache(ctx context.Context) {
 	reloadCtx, cancel := context.WithTimeout(ctx, cacheReloadTimeout)
 	defer cancel()
-	_ = s.LoadCache(reloadCtx)
+	if err := s.LoadCache(reloadCtx); err != nil {
+		s.log.Error("cache reload failed", "error", err)
+	} else {
+		s.log.Debug("cache reloaded", "flags", s.cacheSize())
+	}
 }
 
 func (s *Service) publishFlagEvent(ctx context.Context, eventType string, flag repository.Flag) error {

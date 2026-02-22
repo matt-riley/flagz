@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html/template"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -27,6 +27,7 @@ type Handler struct {
 	SessionMgr    *SessionManager
 	Templates     *TemplateManager
 	AdminHostname string
+	log           *slog.Logger
 	mux           *http.ServeMux
 }
 
@@ -34,12 +35,16 @@ type TemplateManager struct {
 	// Wrapper to help with rendering
 }
 
-func NewHandler(repo *repository.PostgresRepository, svc *service.Service, sessionMgr *SessionManager, adminHostname string) *Handler {
+func NewHandler(repo *repository.PostgresRepository, svc *service.Service, sessionMgr *SessionManager, adminHostname string, log *slog.Logger) *Handler {
+	if log == nil {
+		log = slog.Default()
+	}
 	h := &Handler{
 		Repo:          repo,
 		Service:       svc,
 		SessionMgr:    sessionMgr,
 		AdminHostname: adminHostname,
+		log:           log,
 	}
 	h.mux = h.buildMux()
 	return h
@@ -128,7 +133,7 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		if err := Render(w, "setup.html", map[string]any{
 			"CSRFToken": csrfToken,
 		}); err != nil {
-			log.Printf("render error: %v", err)
+			h.log.Error("render error", "error", err)
 		}
 		return
 	}
@@ -144,14 +149,14 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 
 		if len(username) < 3 || len(username) > 50 {
 			if err := Render(w, "setup.html", map[string]any{"Error": "Username must be between 3 and 50 characters"}); err != nil {
-				log.Printf("render error: %v", err)
+				h.log.Error("render error", "error", err)
 			}
 			return
 		}
 		for _, c := range username {
 			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.') {
 				if err := Render(w, "setup.html", map[string]any{"Error": "Username may only contain letters, digits, underscores, hyphens, and dots"}); err != nil {
-					log.Printf("render error: %v", err)
+					h.log.Error("render error", "error", err)
 				}
 				return
 			}
@@ -159,14 +164,14 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 
 		if password != confirm {
 			if err := Render(w, "setup.html", map[string]any{"Error": "Passwords do not match"}); err != nil {
-				log.Printf("render error: %v", err)
+				h.log.Error("render error", "error", err)
 			}
 			return
 		}
 
 		if len(password) < 12 {
 			if err := Render(w, "setup.html", map[string]any{"Error": "Password must be at least 12 characters"}); err != nil {
-				log.Printf("render error: %v", err)
+				h.log.Error("render error", "error", err)
 			}
 			return
 		}
@@ -182,9 +187,9 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 				http.Redirect(w, r, "/login", http.StatusFound)
 				return
 			}
-			log.Printf("Failed to create admin user: %v", err)
+			h.log.Error("failed to create admin user", "error", err)
 			if err := Render(w, "setup.html", map[string]any{"Error": "Failed to create user"}); err != nil {
-				log.Printf("render error: %v", err)
+				h.log.Error("render error", "error", err)
 			}
 			return
 		}
@@ -208,7 +213,7 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		if err := Render(w, "login.html", map[string]any{
 			"CSRFToken": csrfToken,
 		}); err != nil {
-			log.Printf("render error: %v", err)
+			h.log.Error("render error", "error", err)
 		}
 		return
 	}
@@ -237,7 +242,7 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		
 		if allowed := h.SessionMgr.CheckLoginRateLimit(remoteAddr); !allowed {
 			if err := Render(w, "login.html", map[string]any{"Error": "Too many attempts. Please try again later."}); err != nil {
-				log.Printf("render error: %v", err)
+				h.log.Error("render error", "error", err)
 			}
 			return
 		}
@@ -248,7 +253,7 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 			// Don't reveal if user exists vs db error, generally
 			// For admin portal, generic error is fine
 			if err := Render(w, "login.html", map[string]any{"Error": "Invalid credentials"}); err != nil {
-				log.Printf("render error: %v", err)
+				h.log.Error("render error", "error", err)
 			}
 			return
 		}
@@ -257,7 +262,7 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		if err != nil || !match {
 			h.SessionMgr.RecordLoginAttempt(remoteAddr)
 			if err := Render(w, "login.html", map[string]any{"Error": "Invalid credentials"}); err != nil {
-				log.Printf("render error: %v", err)
+				h.log.Error("render error", "error", err)
 			}
 			return
 		}
@@ -311,7 +316,7 @@ func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"Projects":  projects,
 		"CSRFToken": session.CSRFToken,
 	}); err != nil {
-		log.Printf("render error: %v", err)
+		h.log.Error("render error", "error", err)
 	}
 }
 
@@ -383,7 +388,7 @@ func (h *Handler) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 		"Flags":     flags,
 		"CSRFToken": session.CSRFToken,
 	}); err != nil {
-		log.Printf("render error: %v", err)
+		h.log.Error("render error", "error", err)
 	}
 }
 
