@@ -337,6 +337,124 @@ func TestHTTPHandlerStreamSendsSSEErrorAfterStartOnBackendFailure(t *testing.T) 
 	}
 }
 
+func TestHTTPHandlerCreateAPIKey(t *testing.T) {
+	svc := &fakeService{
+		createAPIKeyFunc: func(_ context.Context, projectID string) (string, string, error) {
+			if projectID != "default" {
+				t.Fatalf("CreateAPIKey projectID = %q, want %q", projectID, "default")
+			}
+			return "abc123", "secretvalue", nil
+		},
+	}
+
+	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
+	req := reqWithProject(httptest.NewRequest(http.MethodPost, "/v1/api-keys", nil))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusCreated)
+	}
+
+	var got map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if got["id"] != "abc123" {
+		t.Fatalf("response id = %q, want %q", got["id"], "abc123")
+	}
+	if got["secret"] != "abc123.secretvalue" {
+		t.Fatalf("response secret = %q, want %q", got["secret"], "abc123.secretvalue")
+	}
+}
+
+func TestHTTPHandlerListAPIKeys(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	svc := &fakeService{
+		listAPIKeysFunc: func(_ context.Context, projectID string) ([]repository.APIKeyMeta, error) {
+			if projectID != "default" {
+				t.Fatalf("ListAPIKeys projectID = %q, want %q", projectID, "default")
+			}
+			return []repository.APIKeyMeta{
+				{ID: "key1", ProjectID: "default", CreatedAt: now},
+			}, nil
+		},
+	}
+
+	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
+	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/api-keys", nil))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var got []repository.APIKeyMeta
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "key1" {
+		t.Fatalf("response = %#v, want single key1", got)
+	}
+}
+
+func TestHTTPHandlerDeleteAPIKey(t *testing.T) {
+	svc := &fakeService{
+		deleteAPIKeyFunc: func(_ context.Context, projectID, keyID string) error {
+			if projectID != "default" {
+				t.Fatalf("DeleteAPIKey projectID = %q, want %q", projectID, "default")
+			}
+			if keyID != "key1" {
+				t.Fatalf("DeleteAPIKey keyID = %q, want %q", keyID, "key1")
+			}
+			return nil
+		},
+	}
+
+	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
+	req := reqWithProject(httptest.NewRequest(http.MethodDelete, "/v1/api-keys/key1", nil))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+}
+
+func TestHTTPHandlerDeleteAPIKeyNotFound(t *testing.T) {
+	svc := &fakeService{
+		deleteAPIKeyFunc: func(_ context.Context, _, _ string) error {
+			return service.ErrAPIKeyNotFound
+		},
+	}
+
+	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
+	req := reqWithProject(httptest.NewRequest(http.MethodDelete, "/v1/api-keys/missing", nil))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if !strings.Contains(rec.Body.String(), `"error":"api key not found"`) {
+		t.Fatalf("body = %q, want api key not found error", rec.Body.String())
+	}
+}
+
+func TestHTTPHandlerCreateAPIKeyUnauthorized(t *testing.T) {
+	svc := &fakeService{}
+
+	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
+	req := httptest.NewRequest(http.MethodPost, "/v1/api-keys", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
 type fakeService struct {
 	createFlagFunc            func(ctx context.Context, flag repository.Flag) (repository.Flag, error)
 	updateFlagFunc            func(ctx context.Context, flag repository.Flag) (repository.Flag, error)
@@ -347,6 +465,9 @@ type fakeService struct {
 	resolveBatchFunc          func(ctx context.Context, requests []service.ResolveRequest) ([]service.ResolveResult, error)
 	listEventsSinceFunc       func(ctx context.Context, projectID string, eventID int64) ([]repository.FlagEvent, error)
 	listEventsSinceForKeyFunc func(ctx context.Context, projectID string, eventID int64, key string) ([]repository.FlagEvent, error)
+	createAPIKeyFunc          func(ctx context.Context, projectID string) (string, string, error)
+	listAPIKeysFunc           func(ctx context.Context, projectID string) ([]repository.APIKeyMeta, error)
+	deleteAPIKeyFunc          func(ctx context.Context, projectID, keyID string) error
 }
 
 func (f *fakeService) CreateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error) {
@@ -410,4 +531,25 @@ func (f *fakeService) ListEventsSinceForKey(ctx context.Context, projectID strin
 		return f.listEventsSinceForKeyFunc(ctx, projectID, eventID, key)
 	}
 	return nil, errors.New("ListEventsSinceForKey not implemented")
+}
+
+func (f *fakeService) CreateAPIKey(ctx context.Context, projectID string) (string, string, error) {
+	if f.createAPIKeyFunc != nil {
+		return f.createAPIKeyFunc(ctx, projectID)
+	}
+	return "", "", errors.New("CreateAPIKey not implemented")
+}
+
+func (f *fakeService) ListAPIKeys(ctx context.Context, projectID string) ([]repository.APIKeyMeta, error) {
+	if f.listAPIKeysFunc != nil {
+		return f.listAPIKeysFunc(ctx, projectID)
+	}
+	return nil, errors.New("ListAPIKeys not implemented")
+}
+
+func (f *fakeService) DeleteAPIKey(ctx context.Context, projectID, keyID string) error {
+	if f.deleteAPIKeyFunc != nil {
+		return f.deleteAPIKeyFunc(ctx, projectID, keyID)
+	}
+	return errors.New("DeleteAPIKey not implemented")
 }

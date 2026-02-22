@@ -29,6 +29,9 @@ type Service interface {
 	ResolveBatch(ctx context.Context, requests []service.ResolveRequest) ([]service.ResolveResult, error)
 	ListEventsSince(ctx context.Context, projectID string, eventID int64) ([]repository.FlagEvent, error)
 	ListEventsSinceForKey(ctx context.Context, projectID string, eventID int64, key string) ([]repository.FlagEvent, error)
+	CreateAPIKey(ctx context.Context, projectID string) (string, string, error)
+	ListAPIKeys(ctx context.Context, projectID string) ([]repository.APIKeyMeta, error)
+	DeleteAPIKey(ctx context.Context, projectID, keyID string) error
 }
 
 var _ Service = (*service.Service)(nil)
