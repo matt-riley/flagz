@@ -81,8 +81,11 @@ func run() error {
 
 	authFailure := middleware.WithOnAuthFailure(func() { m.AuthFailuresTotal.Inc() })
 	tokenValidator := &apiKeyTokenValidator{lookup: repo}
+	rateLimiter := middleware.NewRateLimiter(ctx, cfg.AuthRateLimit)
+	defer rateLimiter.Stop()
+	authRL := middleware.WithRateLimiter(rateLimiter)
 	apiHandler := server.NewHTTPHandlerWithOptions(svc, cfg.StreamPollInterval, m)
-	httpHandler := newHTTPHandler(apiHandler, tokenValidator, authFailure)
+	httpHandler := newHTTPHandler(apiHandler, tokenValidator, authFailure, authRL)
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -94,11 +97,11 @@ func run() error {
 
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
-			middleware.UnaryBearerAuthInterceptor(tokenValidator, authFailure),
+			middleware.UnaryBearerAuthInterceptor(tokenValidator, authFailure, authRL),
 			m.UnaryServerInterceptor(),
 		),
 		grpc.ChainStreamInterceptor(
-			middleware.StreamBearerAuthInterceptor(tokenValidator, authFailure),
+			middleware.StreamBearerAuthInterceptor(tokenValidator, authFailure, authRL),
 			m.StreamServerInterceptor(),
 		),
 	)

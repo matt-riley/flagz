@@ -39,6 +39,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.TSStateDir != "tsnet-state" {
 		t.Errorf("TSStateDir = %q, want tsnet-state", cfg.TSStateDir)
 	}
+	if cfg.AuthRateLimit != 10 {
+		t.Errorf("AuthRateLimit = %d, want 10", cfg.AuthRateLimit)
+	}
 }
 
 func TestLoad_StreamPollInterval_Invalid(t *testing.T) {
