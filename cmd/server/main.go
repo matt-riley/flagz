@@ -67,7 +67,13 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("init tracing: %w", err)
 	}
-	defer shutdownTracer(context.Background())
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracer(ctx); err != nil {
+			log.Error("tracer shutdown error", "err", err)
+		}
+	}()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
