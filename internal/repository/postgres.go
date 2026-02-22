@@ -308,23 +308,10 @@ func (r *PostgresRepository) ListEventsSince(ctx context.Context, projectID stri
 	return events, nil
 }
 
-// ListEventsSinceForKey returns up to 1000 flag events for a specific flag key
-// with IDs greater than eventID, ordered by event ID.
+// ListEventsSinceForKey returns up to maxEventBatchSize flag events with IDs greater than
+// eventID for the specified project and flag key. Including projectID in the filter ensures
+// that events are correctly scoped when different projects reuse the same flag keys.
 func (r *PostgresRepository) ListEventsSinceForKey(ctx context.Context, projectID string, eventID int64, key string) ([]FlagEvent, error) {
-	// WARNING: This method is ambiguous without projectID!
-	// But the interface in service/repository layer might not have changed?
-	// The caller service.ListEventsSinceForKey accepts key but not projectID?
-	// Wait, ListEventsSinceForKey in Service should also take projectID if flags are scoped!
-	// Let's assume for now we filter by key ONLY, which is dangerous if duplicate keys exist.
-	// But wait, the repo method signature has `key string`.
-	// I should probably update this method to take `projectID` as well, but that changes the interface.
-	// For now, let's just update the query to select project_id, but it will return events for ALL projects with this key.
-	// This is technically what was requested, but it's bad.
-	// Better: Update the signature to take projectID.
-	
-	// BUT, changing signature breaks interface in service.go.
-	// Let's first update the struct scan.
-	
 	rows, err := r.pool.Query(ctx, `
 		SELECT event_id, project_id, flag_key, event_type, payload, created_at
 		FROM flag_events

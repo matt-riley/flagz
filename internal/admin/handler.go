@@ -17,11 +17,12 @@ import (
 )
 
 type Handler struct {
-	Repo         *repository.PostgresRepository
-	Service      *service.Service
-	SessionMgr   *SessionManager
-	Templates    *TemplateManager
+	Repo          *repository.PostgresRepository
+	Service       *service.Service
+	SessionMgr    *SessionManager
+	Templates     *TemplateManager
 	AdminHostname string
+	mux           *http.ServeMux
 }
 
 type TemplateManager struct {
@@ -29,15 +30,21 @@ type TemplateManager struct {
 }
 
 func NewHandler(repo *repository.PostgresRepository, svc *service.Service, sessionMgr *SessionManager, adminHostname string) *Handler {
-	return &Handler{
+	h := &Handler{
 		Repo:          repo,
 		Service:       svc,
 		SessionMgr:    sessionMgr,
 		AdminHostname: adminHostname,
 	}
+	h.mux = h.buildMux()
+	return h
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.mux.ServeHTTP(w, r)
+}
+
+func (h *Handler) buildMux() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// Public routes
@@ -53,7 +60,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Static assets
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(content))))
 
-	mux.ServeHTTP(w, r)
+	return mux
 }
 
 // requireAuth middleware ensures a valid session exists

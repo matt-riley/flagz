@@ -1,5 +1,7 @@
 -- +goose Up
 -- New tables
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 CREATE TABLE projects (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL UNIQUE,
@@ -46,3 +48,7 @@ ALTER TABLE api_keys ALTER COLUMN project_id SET NOT NULL;
 ALTER TABLE flag_events ADD COLUMN project_id UUID REFERENCES projects(id);
 UPDATE flag_events SET project_id = '11111111-1111-1111-1111-111111111111' WHERE project_id IS NULL;
 ALTER TABLE flag_events ALTER COLUMN project_id SET NOT NULL;
+
+-- Add indexes for new query patterns
+CREATE INDEX idx_flag_events_project_event ON flag_events (project_id, event_id);
+CREATE INDEX idx_flag_events_project_key_event ON flag_events (project_id, flag_key, event_id);
