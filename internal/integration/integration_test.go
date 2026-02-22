@@ -248,8 +248,30 @@ func TestFlagCRUD(t *testing.T) {
 		if string(got.Variants) == "{}" {
 			t.Error("Variants were not persisted")
 		}
+
+		var variants map[string]string
+		if err := json.Unmarshal(got.Variants, &variants); err != nil {
+			t.Fatalf("unmarshal Variants: %v (raw: %s)", err, string(got.Variants))
+		}
+		if len(variants) != 2 || variants["control"] != "off" || variants["experiment"] != "on" {
+			t.Errorf("Variants = %s, want {control:off, experiment:on}", string(got.Variants))
+		}
+
 		if string(got.Rules) == "[]" {
 			t.Error("Rules were not persisted")
+		}
+
+		type rule struct {
+			Attribute string `json:"attribute"`
+			Operator  string `json:"operator"`
+			Value     string `json:"value"`
+		}
+		var rules []rule
+		if err := json.Unmarshal(got.Rules, &rules); err != nil {
+			t.Fatalf("unmarshal Rules: %v (raw: %s)", err, string(got.Rules))
+		}
+		if len(rules) != 1 || rules[0].Attribute != "country" || rules[0].Operator != "equals" || rules[0].Value != "US" {
+			t.Errorf("Rules = %s, want [{attribute:country, operator:equals, value:US}]", string(got.Rules))
 		}
 	})
 
