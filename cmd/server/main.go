@@ -100,9 +100,6 @@ func run() error {
 		}
 
 		dir := cfg.TSStateDir
-		if dir == "" {
-			dir = "./ts-state"
-		}
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return fmt.Errorf("create ts-state dir: %w", err)
 		}

@@ -22,6 +22,7 @@ const (
 	defaultHTTPAddr           = ":8080"
 	defaultGRPCAddr           = ":9090"
 	defaultStreamPollInterval = time.Second
+	defaultTSStateDir         = "tsnet-state"
 )
 
 // Config holds the runtime configuration for the flagz server.
@@ -46,9 +47,6 @@ func Load() (Config, error) {
 	}
 
 	sessionSecret := strings.TrimSpace(os.Getenv("SESSION_SECRET"))
-	// Only require session secret if admin is enabled (via ADMIN_HOSTNAME)
-	// But wait, ADMIN_HOSTNAME is parsed below.
-	// Let's defer this check until we check ADMIN_HOSTNAME.
 
 	streamPollInterval := defaultStreamPollInterval
 	if value := strings.TrimSpace(os.Getenv("STREAM_POLL_INTERVAL")); value != "" {
@@ -67,6 +65,9 @@ func Load() (Config, error) {
 	if adminHostname != "" && sessionSecret == "" {
 		return Config{}, errors.New("SESSION_SECRET is required when ADMIN_HOSTNAME is set")
 	}
+	if adminHostname != "" && len(sessionSecret) < 32 {
+		return Config{}, errors.New("SESSION_SECRET must be at least 32 characters when ADMIN_HOSTNAME is set")
+	}
 
 	return Config{
 		DatabaseURL:        databaseURL,
@@ -75,7 +76,7 @@ func Load() (Config, error) {
 		StreamPollInterval: streamPollInterval,
 		AdminHostname:      adminHostname, // Default to empty (disabled)
 		TSAuthKey:          os.Getenv("TS_AUTH_KEY"),
-		TSStateDir:         envOrDefault("TS_STATE_DIR", "tsnet-state"),
+		TSStateDir:         envOrDefault("TS_STATE_DIR", defaultTSStateDir),
 		SessionSecret:      sessionSecret,
 	}, nil
 }

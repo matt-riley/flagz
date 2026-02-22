@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -38,11 +39,32 @@ type SessionManager struct {
 }
 
 func NewSessionManager(repo *repository.PostgresRepository, sessionSecret string) *SessionManager {
-	return &SessionManager{
+	mgr := &SessionManager{
 		repo:          repo,
 		sessionSecret: []byte(sessionSecret),
 		loginAttempts: make(map[string][]time.Time),
 	}
+	// Periodically clean up old rate limit entries to prevent unbounded memory growth
+	// and purge expired sessions from the database.
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			mgr.mu.Lock()
+			now := time.Now()
+			for ip, attempts := range mgr.loginAttempts {
+				if len(attempts) == 0 || now.Sub(attempts[len(attempts)-1]) > loginWindow {
+					delete(mgr.loginAttempts, ip)
+				}
+			}
+			mgr.mu.Unlock()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_ = repo.DeleteExpiredAdminSessions(ctx)
+			cancel()
+		}
+	}()
+	return mgr
 }
 
 // GenerateSession creates a new session for the user, returning the raw token to be set in the cookie.
@@ -55,7 +77,7 @@ func (m *SessionManager) GenerateSession(ctx context.Context, userID string) (st
 	rawToken := base64.RawURLEncoding.EncodeToString(tokenBytes)
 
 	// Hash token for storage
-	idHash := hashToken(rawToken)
+	idHash := m.hashToken(rawToken)
 
 	// Generate CSRF token
 	csrfBytes := make([]byte, csrfTokenLength)
@@ -85,7 +107,7 @@ func (m *SessionManager) ValidateSession(ctx context.Context, rawToken string) (
 		return repository.AdminSession{}, ErrUnauthorized
 	}
 
-	idHash := hashToken(rawToken)
+	idHash := m.hashToken(rawToken)
 	session, err := m.repo.GetAdminSession(ctx, idHash)
 	if err != nil {
 		return repository.AdminSession{}, ErrUnauthorized
@@ -101,7 +123,7 @@ func (m *SessionManager) ValidateSession(ctx context.Context, rawToken string) (
 
 // InvalidateSession removes the session from the DB.
 func (m *SessionManager) InvalidateSession(ctx context.Context, rawToken string) error {
-	idHash := hashToken(rawToken)
+	idHash := m.hashToken(rawToken)
 	return m.repo.DeleteAdminSession(ctx, idHash)
 }
 
@@ -166,7 +188,10 @@ func (m *SessionManager) RecordLoginAttempt(ip string) {
 	m.loginAttempts[ip] = append(m.loginAttempts[ip], time.Now())
 }
 
-func hashToken(token string) string {
-	hash := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(hash[:])
+// hashToken computes an HMAC-SHA256 of the token using the session secret,
+// preventing offline token forgery if the database is compromised.
+func (m *SessionManager) hashToken(token string) string {
+	mac := hmac.New(sha256.New, m.sessionSecret)
+	mac.Write([]byte(token))
+	return hex.EncodeToString(mac.Sum(nil))
 }

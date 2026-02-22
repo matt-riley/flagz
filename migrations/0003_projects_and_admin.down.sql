@@ -1,8 +1,12 @@
 -- +goose Down
+-- WARNING: If multiple projects use the same flag key, this migration will fail.
+-- You must delete or merge duplicate keys before rolling back.
+
 -- Revert api_keys changes
 ALTER TABLE api_keys DROP COLUMN project_id;
 
--- Revert flags changes
+-- Revert flags changes (will fail if duplicate keys exist across projects)
+DELETE FROM flags WHERE project_id != '11111111-1111-1111-1111-111111111111';
 ALTER TABLE flags DROP CONSTRAINT flags_pkey;
 ALTER TABLE flags ADD PRIMARY KEY (key);
 ALTER TABLE flags DROP COLUMN project_id;

@@ -26,7 +26,7 @@ const (
 // the service layer handles the conversion.
 type Flag struct {
 	Key         string          `json:"key"`
-	ProjectID   string          `json:"project_id"`
+	ProjectID   string          `json:"-"`
 	Description string          `json:"description"`
 	Enabled     bool            `json:"enabled"`
 	Variants    json.RawMessage `json:"variants"`
@@ -488,6 +488,15 @@ func (r *PostgresRepository) DeleteAdminSession(ctx context.Context, idHash stri
 	_, err := r.pool.Exec(ctx, `DELETE FROM admin_sessions WHERE id_hash = $1`, idHash)
 	if err != nil {
 		return fmt.Errorf("delete admin session: %w", err)
+	}
+	return nil
+}
+
+// DeleteExpiredAdminSessions removes all sessions that have passed their expiry time.
+func (r *PostgresRepository) DeleteExpiredAdminSessions(ctx context.Context) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM admin_sessions WHERE expires_at < NOW()`)
+	if err != nil {
+		return fmt.Errorf("delete expired admin sessions: %w", err)
 	}
 	return nil
 }

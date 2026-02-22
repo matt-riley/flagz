@@ -165,7 +165,7 @@ All configuration is via environment variables.
 | `STREAM_POLL_INTERVAL` |          | `1s`    | How often streams poll for new events (must be > 0) |
 | `ADMIN_HOSTNAME`       |          | —       | Hostname for the Admin Portal on Tailscale          |
 | `TS_AUTH_KEY`          |          | —       | Tailscale Auth Key (required if ADMIN_HOSTNAME set) |
-| `TS_STATE_DIR`         |          | `./ts-state` | Directory to store Tailscale state             |
+| `TS_STATE_DIR`         |          | `tsnet-state` | Directory to store Tailscale state             |
 | `SESSION_SECRET`       |          | —       | Secret for signing admin sessions (32+ chars)       |
 
 `STREAM_POLL_INTERVAL` accepts any Go duration string: `500ms`, `2s`, `1m`, etc.

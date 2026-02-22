@@ -349,11 +349,12 @@ return status.Error(codes.Internal, "internal server error")
 }
 
 func isInvalidArgumentError(err error) bool {
-if err == nil {
-return false
-}
-
-return strings.EqualFold(strings.TrimSpace(err.Error()), "flag key is required")
+	if err == nil {
+		return false
+	}
+	msg := strings.TrimSpace(err.Error())
+	return strings.EqualFold(msg, "flag key is required") ||
+		strings.EqualFold(msg, "project ID is required")
 }
 
 func parseListPageToken(pageToken string, maxOffset int) (int, error) {

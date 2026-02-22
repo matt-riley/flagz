@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -11,10 +12,13 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/matt-riley/flagz/internal/core"
 	"github.com/matt-riley/flagz/internal/repository"
 	"github.com/matt-riley/flagz/internal/service"
 )
+
+type adminContextKey string
+
+const sessionContextKey adminContextKey = "admin_session"
 
 type Handler struct {
 	Repo          *repository.PostgresRepository
@@ -63,7 +67,8 @@ func (h *Handler) buildMux() *http.ServeMux {
 	return mux
 }
 
-// requireAuth middleware ensures a valid session exists
+// requireAuth middleware ensures a valid session exists and validates
+// CSRF tokens on state-changing requests.
 func (h *Handler) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("flagz_admin_session")
@@ -78,12 +83,20 @@ func (h *Handler) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// Inject session into context if needed, or just pass user info to template
+		// Validate CSRF token on state-changing requests
+		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete {
+			csrfToken := r.FormValue("csrf_token")
+			if csrfToken == "" {
+				csrfToken = r.Header.Get("X-CSRF-Token")
+			}
+			if subtle.ConstantTimeCompare([]byte(csrfToken), []byte(session.CSRFToken)) != 1 {
+				http.Error(w, "Forbidden: invalid CSRF token", http.StatusForbidden)
+				return
+			}
+		}
+
 		ctx := r.Context()
-		// (Optional) add user to context
-		// For now we just proceed, handleDashboard et al will re-fetch or we should put in context
-		// Let's put the session in context to avoid re-fetching cookie
-		ctx = context.WithValue(ctx, "admin_session", session)
+		ctx = context.WithValue(ctx, sessionContextKey, session)
 		next(w, r.WithContext(ctx))
 	}
 }
@@ -118,6 +131,11 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if len(password) < 12 {
+			Render(w, "setup.html", map[string]any{"Error": "Password must be at least 12 characters"})
+			return
+		}
+
 		hash, err := HashPassword(password)
 		if err != nil {
 			http.Error(w, "Failed to hash password", http.StatusInternalServerError)
@@ -137,7 +155,7 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
 		Render(w, "login.html", map[string]any{
-			"CSRFToken": "login-csrf", // TODO: Implement proper CSRF
+			"CSRFToken": h.generateCSRFToken(),
 		})
 		return
 	}
@@ -195,7 +213,7 @@ func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	session, ok := r.Context().Value("admin_session").(repository.AdminSession)
+	session, ok := r.Context().Value(sessionContextKey).(repository.AdminSession)
 	if !ok {
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
@@ -221,8 +239,7 @@ func (h *Handler) handleProjects(w http.ResponseWriter, r *http.Request) {
 		desc := r.FormValue("description")
 
 		if _, err := h.Repo.CreateProject(r.Context(), name, desc); err != nil {
-			// TODO: Better error handling
-			http.Error(w, "Failed to create project: "+err.Error(), http.StatusInternalServerError)
+			http.Error(w, "Failed to create project", http.StatusInternalServerError)
 			return
 		}
 
@@ -231,7 +248,7 @@ func (h *Handler) handleProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
-	session, ok := r.Context().Value("admin_session").(repository.AdminSession)
+	session, ok := r.Context().Value(sessionContextKey).(repository.AdminSession)
 	if !ok {
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
@@ -259,8 +276,6 @@ func (h *Handler) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 	// Fetch user for template
 	user, err := h.Repo.GetAdminUserByID(r.Context(), session.AdminUserID)
 	if err != nil {
-		// If user not found (deleted?), invalidate session?
-		// For now just log and continue or error
 		http.Error(w, "User not found", http.StatusUnauthorized)
 		return
 	}
@@ -295,11 +310,6 @@ func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *r
 		desc := r.FormValue("description")
 		enabled := r.FormValue("enabled") == "on"
 
-		// Use Service to create flag (handles cache update and event publishing)
-		// We need to map inputs to Service.CreateFlag inputs
-		// Service expects: ctx, flag repository.Flag
-		// CreateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error)
-		
 		flag := repository.Flag{
 			ProjectID:   project.ID,
 			Key:         key,
@@ -327,7 +337,6 @@ func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *r
 
 	// POST /projects/{id}/flags/{key}/toggle
 	if len(subPath) == 2 && subPath[1] == "toggle" && r.Method == "POST" {
-		// Get flag via Repo to get raw bytes (Service returns parsed core.Flag)
 		repoFlag, err := h.Repo.GetFlag(r.Context(), project.ID, flagKey)
 		if err != nil {
 			http.NotFound(w, r)
@@ -343,9 +352,6 @@ func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *r
 
 		// Render just the row if HTMX request
 		if r.Header.Get("HX-Request") == "true" {
-			// This is a bit hacky, normally you'd have a partial template for the row
-			// For now, let's just re-render the button or the whole row?
-			// The button is easier to construct manually for this MVP
 			colorClass := "bg-red-100 text-red-800"
 			text := "Disabled"
 			if repoFlag.Enabled {
@@ -353,8 +359,8 @@ func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *r
 				text = "Enabled"
 			}
 			
-			html := fmt.Sprintf(`<button hx-post="/projects/%s/flags/%s/toggle" hx-vals='{"csrf_token": "%s"}' hx-target="#flag-row-%s" hx-swap="outerHTML" class="%s px-2 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer">%s</button>`,
-				project.ID, flagKey, r.FormValue("csrf_token"), flagKey, colorClass, text)
+			html := fmt.Sprintf(`<button hx-post="/projects/%s/flags/%s/toggle" hx-vals='{"csrf_token": "%s"}' hx-target="this" hx-swap="outerHTML" class="%s px-2 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer">%s</button>`,
+				project.ID, flagKey, r.FormValue("csrf_token"), colorClass, text)
 			
 			w.Header().Set("Content-Type", "text/html")
 			w.Write([]byte(html))
@@ -385,16 +391,4 @@ func (h *Handler) generateCSRFToken() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	return hex.EncodeToString(b)
-}
-
-// Helper to convert repository.Flag to core.Flag if needed
-func repositoryFlagToCore(f *repository.Flag) *core.Flag {
-	// Re-implement if needed, or import from service if exposed
-	return &core.Flag{
-		Key:         f.Key,
-		// Description not in core.Flag? Let's check.
-		// Description: f.Description,
-		Disabled:    !f.Enabled, // NOTE: Inversion
-		// Variants/Rules parsing omitted for brevity
-	}
 }
