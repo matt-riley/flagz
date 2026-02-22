@@ -43,8 +43,7 @@ func runTests(m *testing.M) int {
 			"POSTGRES_USER":     "test",
 			"POSTGRES_PASSWORD": "test",
 		},
-		WaitingFor: wait.ForLog("database system is ready to accept connections").
-			WithOccurrence(2).
+		WaitingFor: wait.ForListeningPort("5432/tcp").
 			WithStartupTimeout(30 * time.Second),
 	}
 
@@ -53,18 +52,21 @@ func runTests(m *testing.M) int {
 		Started:          true,
 	})
 	if err != nil {
-		log.Fatalf("start postgres container: %v", err)
+		log.Printf("start postgres container: %v", err)
+		return 1
 	}
 	defer func() { _ = pgContainer.Terminate(ctx) }()
 
 	host, err := pgContainer.Host(ctx)
 	if err != nil {
-		log.Fatalf("get container host: %v", err)
+		log.Printf("get container host: %v", err)
+		return 1
 	}
 
 	mappedPort, err := pgContainer.MappedPort(ctx, "5432/tcp")
 	if err != nil {
-		log.Fatalf("get mapped port: %v", err)
+		log.Printf("get mapped port: %v", err)
+		return 1
 	}
 
 	connStr := fmt.Sprintf(
@@ -73,23 +75,35 @@ func runTests(m *testing.M) int {
 	)
 
 	// Run goose migrations.
-	migrationsDir := findMigrationsDir()
+	migrationsDir, err := findMigrationsDir()
+	if err != nil {
+		log.Printf("find migrations: %v", err)
+		return 1
+	}
 	db, err := sql.Open("pgx", connStr)
 	if err != nil {
-		log.Fatalf("open db for migrations: %v", err)
+		log.Printf("open db for migrations: %v", err)
+		return 1
 	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("close db after migrations: %v", err)
+		}
+	}()
 	if err := goose.SetDialect("postgres"); err != nil {
-		log.Fatalf("set goose dialect: %v", err)
+		log.Printf("set goose dialect: %v", err)
+		return 1
 	}
 	if err := goose.Up(db, migrationsDir); err != nil {
-		log.Fatalf("run migrations: %v", err)
+		log.Printf("run migrations: %v", err)
+		return 1
 	}
-	db.Close()
 
 	// Create pgxpool for repository usage.
 	testPool, err = pgxpool.New(ctx, connStr)
 	if err != nil {
-		log.Fatalf("create pool: %v", err)
+		log.Printf("create pool: %v", err)
+		return 1
 	}
 	defer testPool.Close()
 
@@ -98,19 +112,19 @@ func runTests(m *testing.M) int {
 
 // findMigrationsDir walks up from the working directory until it finds a
 // migrations/ directory (the repository root contains it).
-func findMigrationsDir() string {
+func findMigrationsDir() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
-		log.Fatalf("get working directory: %v", err)
+		return "", fmt.Errorf("get working directory: %w", err)
 	}
 	for {
 		candidate := filepath.Join(dir, "migrations")
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return candidate
+			return candidate, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			log.Fatal("migrations directory not found")
+			return "", fmt.Errorf("migrations directory not found")
 		}
 		dir = parent
 	}
