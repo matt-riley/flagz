@@ -82,14 +82,15 @@ type ResolveResult struct {
 // boolean evaluation, event streaming, and an in-memory cache of all flags.
 // All exported methods are safe for concurrent use.
 type Service struct {
-	repo            Repository
-	log             *slog.Logger
-	mu              sync.RWMutex
-	cache           map[string]map[string]repository.Flag // map[projectID]map[key]Flag
-	onCacheLoad     func()
-	onInvalidation  func()
-	onCacheReset    func()
-	onCacheUpdate   func(projectID string, size float64)
+	repo                Repository
+	log                 *slog.Logger
+	mu                  sync.RWMutex
+	cache               map[string]map[string]repository.Flag // map[projectID]map[key]Flag
+	cacheResyncInterval time.Duration
+	onCacheLoad         func()
+	onInvalidation      func()
+	onCacheReset        func()
+	onCacheUpdate       func(projectID string, size float64)
 }
 
 // Option configures optional [Service] parameters.
@@ -119,6 +120,16 @@ func WithCacheMetrics(onLoad, onInvalidation, onCacheReset func(), onCacheUpdate
 	}
 }
 
+// WithCacheResyncInterval sets the periodic safety-net cache refresh interval.
+// Defaults to 1 minute if not set or if interval <= 0.
+func WithCacheResyncInterval(interval time.Duration) Option {
+	return func(s *Service) {
+		if interval > 0 {
+			s.cacheResyncInterval = interval
+		}
+	}
+}
+
 // New creates a [Service], eagerly loading the flag cache from the repository.
 // If the repository implements cache invalidation subscriptions, a background
 // listener is started to keep the cache fresh.
@@ -128,9 +139,10 @@ func New(ctx context.Context, repo Repository, opts ...Option) (*Service, error)
 	}
 
 	svc := &Service{
-		repo:  repo,
-		log:   slog.Default(),
-		cache: make(map[string]map[string]repository.Flag),
+		repo:                repo,
+		log:                 slog.Default(),
+		cache:               make(map[string]map[string]repository.Flag),
+		cacheResyncInterval: cacheResyncInterval,
 	}
 	for _, opt := range opts {
 		opt(svc)
@@ -445,7 +457,7 @@ func (s *Service) startCacheInvalidationListener(ctx context.Context, subscriber
 	}
 
 	go func() {
-		resyncTicker := time.NewTicker(cacheResyncInterval)
+		resyncTicker := time.NewTicker(s.cacheResyncInterval)
 		defer resyncTicker.Stop()
 
 		for {

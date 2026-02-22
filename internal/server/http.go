@@ -33,6 +33,7 @@ type HTTPServer struct {
 	metrics            *metrics.Metrics
 	metricsHandler     http.Handler
 	streamPollInterval time.Duration
+	maxJSONBodyBytes   int64
 }
 
 type evaluateJSONRequest struct {
@@ -58,19 +59,32 @@ func NewHTTPHandler(svc Service) http.Handler {
 	return NewHTTPHandlerWithOptions(svc, defaultStreamPollInterval, nil)
 }
 
+// HTTPOption configures optional HTTPServer parameters.
+type HTTPOption func(*HTTPServer)
+
+// WithMaxJSONBodySize sets the maximum allowed JSON request body size in bytes.
+// Defaults to 1MB if not set or if size <= 0.
+func WithMaxJSONBodySize(size int64) HTTPOption {
+	return func(s *HTTPServer) {
+		if size > 0 {
+			s.maxJSONBodyBytes = size
+		}
+	}
+}
+
 // NewHTTPHandlerWithStreamPollInterval returns an [http.Handler] wired with all
 // flagz routes using the specified stream poll interval for SSE.
 //
 // Note: This constructor creates a private [metrics.Metrics] instance. To share
 // a single registry across HTTP and gRPC servers, use [NewHTTPHandlerWithOptions].
-func NewHTTPHandlerWithStreamPollInterval(svc Service, streamPollInterval time.Duration) http.Handler {
-	return NewHTTPHandlerWithOptions(svc, streamPollInterval, nil)
+func NewHTTPHandlerWithStreamPollInterval(svc Service, streamPollInterval time.Duration, opts ...HTTPOption) http.Handler {
+	return NewHTTPHandlerWithOptions(svc, streamPollInterval, nil, opts...)
 }
 
 // NewHTTPHandlerWithOptions returns an [http.Handler] wired with all flagz
 // routes using the specified stream poll interval and metrics. If m is nil, a
 // default [metrics.Metrics] instance is created.
-func NewHTTPHandlerWithOptions(svc Service, streamPollInterval time.Duration, m *metrics.Metrics) http.Handler {
+func NewHTTPHandlerWithOptions(svc Service, streamPollInterval time.Duration, m *metrics.Metrics, opts ...HTTPOption) http.Handler {
 	if svc == nil {
 		panic("service is nil")
 	}
@@ -88,6 +102,11 @@ func NewHTTPHandlerWithOptions(svc Service, streamPollInterval time.Duration, m 
 		metrics:            m,
 		metricsHandler:     m.Handler(),
 		streamPollInterval: streamPollInterval,
+		maxJSONBodyBytes:   maxJSONBodyBytes,
+	}
+
+	for _, opt := range opts {
+		opt(server)
 	}
 
 	mux := http.NewServeMux()
@@ -164,7 +183,7 @@ func (s *HTTPServer) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var flag repository.Flag
-	if err := decodeJSONBody(w, r, &flag); err != nil {
+	if err := s.decodeJSONBody(w, r, &flag); err != nil {
 		writeJSONDecodeError(w, err)
 		return
 	}
@@ -238,7 +257,7 @@ func (s *HTTPServer) handleUpdateFlag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var flag repository.Flag
-	if err := decodeJSONBody(w, r, &flag); err != nil {
+	if err := s.decodeJSONBody(w, r, &flag); err != nil {
 		writeJSONDecodeError(w, err)
 		return
 	}
@@ -288,7 +307,7 @@ func (s *HTTPServer) handleEvaluate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request evaluateJSONRequest
-	if err := decodeJSONBody(w, r, &request); err != nil {
+	if err := s.decodeJSONBody(w, r, &request); err != nil {
 		writeJSONDecodeError(w, err)
 		return
 	}
@@ -542,12 +561,12 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
+func (s *HTTPServer) decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
 	if r.Body == nil {
 		return io.EOF
 	}
 
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONBodyBytes))
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, s.maxJSONBodyBytes))
 	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(dst); err != nil {
