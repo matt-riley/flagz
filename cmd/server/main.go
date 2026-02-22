@@ -73,7 +73,7 @@ func run() error {
 	m := metrics.New()
 	svc, err := service.New(ctx, repo,
 		service.WithLogger(log),
-		service.WithCacheMetrics(m.IncCacheLoads, m.IncCacheInvalidations, m.SetCacheSize),
+		service.WithCacheMetrics(m.IncCacheLoads, m.IncCacheInvalidations, m.ResetCacheSize, m.SetCacheSize),
 	)
 	if err != nil {
 		return fmt.Errorf("init service: %w", err)

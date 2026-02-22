@@ -37,6 +37,9 @@ func NewGRPCServer(svc Service) *GRPCServer {
 
 // NewGRPCServerWithStreamPollInterval creates a [GRPCServer] with the specified
 // poll interval for the WatchFlag streaming RPC.
+//
+// Note: This constructor creates a private [metrics.Metrics] instance. To share
+// a single registry across HTTP and gRPC servers, use [NewGRPCServerWithOptions].
 func NewGRPCServerWithStreamPollInterval(svc Service, streamPollInterval time.Duration) *GRPCServer {
 	return NewGRPCServerWithOptions(svc, streamPollInterval, nil)
 }

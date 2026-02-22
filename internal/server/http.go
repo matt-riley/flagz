@@ -59,6 +59,9 @@ func NewHTTPHandler(svc Service) http.Handler {
 
 // NewHTTPHandlerWithStreamPollInterval returns an [http.Handler] wired with all
 // flagz routes using the specified stream poll interval for SSE.
+//
+// Note: This constructor creates a private [metrics.Metrics] instance. To share
+// a single registry across HTTP and gRPC servers, use [NewHTTPHandlerWithOptions].
 func NewHTTPHandlerWithStreamPollInterval(svc Service, streamPollInterval time.Duration) http.Handler {
 	return NewHTTPHandlerWithOptions(svc, streamPollInterval, nil)
 }
@@ -120,11 +123,19 @@ type statusRecorder struct {
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
-	if !r.wroteHeader {
-		r.statusCode = code
-		r.wroteHeader = true
+	if r.wroteHeader {
+		return
 	}
+	r.statusCode = code
+	r.wroteHeader = true
 	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Write(b []byte) (int, error) {
+	if !r.wroteHeader {
+		r.WriteHeader(http.StatusOK)
+	}
+	return r.ResponseWriter.Write(b)
 }
 
 func (r *statusRecorder) Flush() {

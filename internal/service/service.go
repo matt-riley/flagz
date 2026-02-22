@@ -88,6 +88,7 @@ type Service struct {
 	cache           map[string]map[string]repository.Flag // map[projectID]map[key]Flag
 	onCacheLoad     func()
 	onInvalidation  func()
+	onCacheReset    func()
 	onCacheUpdate   func(projectID string, size float64)
 }
 
@@ -109,10 +110,11 @@ func WithLogger(log *slog.Logger) Option {
 // WithCacheMetrics registers callbacks invoked on cache operations, allowing
 // Prometheus (or any other) instrumentation without importing the metrics
 // package.
-func WithCacheMetrics(onLoad, onInvalidation func(), onCacheUpdate func(projectID string, size float64)) Option {
+func WithCacheMetrics(onLoad, onInvalidation, onCacheReset func(), onCacheUpdate func(projectID string, size float64)) Option {
 	return func(s *Service) {
 		s.onCacheLoad = onLoad
 		s.onInvalidation = onInvalidation
+		s.onCacheReset = onCacheReset
 		s.onCacheUpdate = onCacheUpdate
 	}
 }
@@ -174,6 +176,9 @@ func (s *Service) LoadCache(ctx context.Context) error {
 		s.onCacheLoad()
 	}
 	if s.onCacheUpdate != nil {
+		if s.onCacheReset != nil {
+			s.onCacheReset()
+		}
 		for pid, m := range next {
 			s.onCacheUpdate(pid, float64(len(m)))
 		}

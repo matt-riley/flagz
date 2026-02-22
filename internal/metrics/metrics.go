@@ -177,6 +177,12 @@ func (m *Metrics) SetCacheSize(projectID string, size float64) {
 	m.CacheSize.WithLabelValues(projectID).Set(size)
 }
 
+// ResetCacheSize removes all project labels from the cache size gauge,
+// preventing stale values for projects that no longer have flags.
+func (m *Metrics) ResetCacheSize() {
+	m.CacheSize.Reset()
+}
+
 // IncCacheLoads increments the cache load counter.
 func (m *Metrics) IncCacheLoads() {
 	m.CacheLoadsTotal.Inc()
