@@ -1,0 +1,48 @@
+{{define "title"}}Audit Log — {{.Project.Name}}{{end}}
+
+{{define "content"}}
+<div class="bg-white p-8 rounded shadow mb-6">
+    <div class="mb-4">
+        <h1 class="text-3xl font-bold">Audit Log</h1>
+        <p class="text-gray-600">Project: <a href="/projects/{{.Project.ID}}" class="text-blue-600 hover:underline">{{.Project.Name}}</a></p>
+    </div>
+</div>
+
+<div class="bg-white p-8 rounded shadow">
+    <h2 class="text-xl font-bold mb-4">Recent Events</h2>
+    <div class="overflow-x-auto">
+        <table class="min-w-full leading-normal">
+            <thead>
+                <tr>
+                    <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Event ID</th>
+                    <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Flag Key</th>
+                    <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Event Type</th>
+                    <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Timestamp</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .Entries}}
+                <tr>
+                    <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm font-mono">{{.EventID}}</td>
+                    <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm font-mono">{{.FlagKey}}</td>
+                    <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">
+                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full
+                            {{if eq .EventType "created"}}bg-green-100 text-green-800
+                            {{else if eq .EventType "updated"}}bg-blue-100 text-blue-800
+                            {{else if eq .EventType "deleted"}}bg-red-100 text-red-800
+                            {{else}}bg-gray-100 text-gray-800{{end}}">
+                            {{.EventType}}
+                        </span>
+                    </td>
+                    <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">{{formatTime .CreatedAt}}</td>
+                </tr>
+                {{else}}
+                <tr>
+                    <td colspan="4" class="px-5 py-5 border-b border-gray-200 bg-white text-sm text-center">No audit log entries found.</td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+    </div>
+</div>
+{{end}}
