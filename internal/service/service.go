@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/matt-riley/flagz/internal/core"
+	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 )
 
@@ -27,10 +28,10 @@ const (
 	// EventTypeUpdated is the event type emitted when a flag is created or updated.
 	EventTypeUpdated = "updated"
 	// EventTypeDeleted is the event type emitted when a flag is deleted.
-	EventTypeDeleted    = "deleted"
-	bestEffortTimeout   = 2 * time.Second
-	cacheResyncInterval = time.Minute
-	cacheReloadTimeout  = 5 * time.Second
+	EventTypeDeleted           = "deleted"
+	bestEffortTimeout          = 2 * time.Second
+	defaultCacheResyncInterval = time.Minute
+	cacheReloadTimeout         = 5 * time.Second
 )
 
 var (
@@ -61,6 +62,8 @@ type Repository interface {
 	ListEventsSince(ctx context.Context, projectID string, eventID int64) ([]repository.FlagEvent, error)
 	ListEventsSinceForKey(ctx context.Context, projectID string, eventID int64, key string) ([]repository.FlagEvent, error)
 	PublishFlagEvent(ctx context.Context, event repository.FlagEvent) (repository.FlagEvent, error)
+	InsertAuditLog(ctx context.Context, entry repository.AuditLogEntry) error
+	ListAuditLog(ctx context.Context, projectID string, limit, offset int) ([]repository.AuditLogEntry, error)
 }
 
 // APIKeyRepository defines the persistence operations for API key management.
@@ -94,14 +97,15 @@ type ResolveResult struct {
 // boolean evaluation, event streaming, and an in-memory cache of all flags.
 // All exported methods are safe for concurrent use.
 type Service struct {
-	repo            Repository
-	log             *slog.Logger
-	mu              sync.RWMutex
-	cache           map[string]map[string]repository.Flag // map[projectID]map[key]Flag
-	onCacheLoad     func()
-	onInvalidation  func()
-	onCacheReset    func()
-	onCacheUpdate   func(projectID string, size float64)
+	repo                Repository
+	log                 *slog.Logger
+	mu                  sync.RWMutex
+	cache               map[string]map[string]repository.Flag // map[projectID]map[key]Flag
+	cacheResyncInterval time.Duration
+	onCacheLoad         func()
+	onInvalidation      func()
+	onCacheReset        func()
+	onCacheUpdate       func(projectID string, size float64)
 }
 
 // Option configures optional [Service] parameters.
@@ -131,6 +135,16 @@ func WithCacheMetrics(onLoad, onInvalidation, onCacheReset func(), onCacheUpdate
 	}
 }
 
+// WithCacheResyncInterval sets the periodic safety-net cache refresh interval.
+// Defaults to 1 minute if not set or if interval <= 0.
+func WithCacheResyncInterval(interval time.Duration) Option {
+	return func(s *Service) {
+		if interval > 0 {
+			s.cacheResyncInterval = interval
+		}
+	}
+}
+
 // New creates a [Service], eagerly loading the flag cache from the repository.
 // If the repository implements cache invalidation subscriptions, a background
 // listener is started to keep the cache fresh.
@@ -140,9 +154,10 @@ func New(ctx context.Context, repo Repository, opts ...Option) (*Service, error)
 	}
 
 	svc := &Service{
-		repo:  repo,
-		log:   slog.Default(),
-		cache: make(map[string]map[string]repository.Flag),
+		repo:                repo,
+		log:                 slog.Default(),
+		cache:               make(map[string]map[string]repository.Flag),
+		cacheResyncInterval: defaultCacheResyncInterval,
 	}
 	for _, opt := range opts {
 		opt(svc)
@@ -222,6 +237,7 @@ func (s *Service) CreateFlag(ctx context.Context, flag repository.Flag) (reposit
 
 	s.setCachedFlag(created)
 	s.publishFlagEventBestEffort(ctx, EventTypeUpdated, created)
+	s.insertAuditLogBestEffort(ctx, created.ProjectID, "create", created.Key)
 
 	return created, nil
 }
@@ -254,6 +270,7 @@ func (s *Service) UpdateFlag(ctx context.Context, flag repository.Flag) (reposit
 
 	s.setCachedFlag(updated)
 	s.publishFlagEventBestEffort(ctx, EventTypeUpdated, updated)
+	s.insertAuditLogBestEffort(ctx, updated.ProjectID, "update", updated.Key)
 
 	return updated, nil
 }
@@ -329,6 +346,7 @@ func (s *Service) DeleteFlag(ctx context.Context, projectID, key string) error {
 
 	s.deleteCachedFlag(projectID, key)
 	s.publishFlagEventBestEffort(ctx, EventTypeDeleted, existing)
+	s.insertAuditLogBestEffort(ctx, projectID, "delete", existing.Key)
 
 	return nil
 }
@@ -506,7 +524,7 @@ func (s *Service) startCacheInvalidationListener(ctx context.Context, subscriber
 	}
 
 	go func() {
-		resyncTicker := time.NewTicker(cacheResyncInterval)
+		resyncTicker := time.NewTicker(s.cacheResyncInterval)
 		defer resyncTicker.Stop()
 
 		for {
@@ -640,4 +658,26 @@ func parseBooleanDefaultFromVariants(payload json.RawMessage) *bool {
 	}
 
 	return &defaultValue
+}
+
+// ListAuditLog returns audit log entries for a project.
+func (s *Service) ListAuditLog(ctx context.Context, projectID string, limit, offset int) ([]repository.AuditLogEntry, error) {
+	if strings.TrimSpace(projectID) == "" {
+		return nil, ErrProjectIDRequired
+	}
+	return s.repo.ListAuditLog(ctx, projectID, limit, offset)
+}
+
+func (s *Service) insertAuditLogBestEffort(ctx context.Context, projectID, action, flagKey string) {
+	apiKeyID, _ := middleware.APIKeyIDFromContext(ctx)
+	adminUserID, _ := middleware.AdminUserIDFromContext(ctx)
+	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), bestEffortTimeout)
+	defer cancel()
+	_ = s.repo.InsertAuditLog(bgCtx, repository.AuditLogEntry{
+		ProjectID:   projectID,
+		APIKeyID:    apiKeyID,
+		AdminUserID: adminUserID,
+		Action:      action,
+		FlagKey:     flagKey,
+	})
 }

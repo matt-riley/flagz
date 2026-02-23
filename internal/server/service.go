@@ -23,6 +23,7 @@ type Service interface {
 	CreateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error)
 	UpdateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error)
 	GetFlag(ctx context.Context, projectID, key string) (repository.Flag, error)
+	// ListFlags returns flags sorted by key.
 	ListFlags(ctx context.Context, projectID string) ([]repository.Flag, error)
 	DeleteFlag(ctx context.Context, projectID, key string) error
 	ResolveBoolean(ctx context.Context, projectID, key string, evalContext core.EvaluationContext, defaultValue bool) (bool, error)
@@ -32,6 +33,7 @@ type Service interface {
 	CreateAPIKey(ctx context.Context, projectID string) (string, string, error)
 	ListAPIKeys(ctx context.Context, projectID string) ([]repository.APIKeyMeta, error)
 	DeleteAPIKey(ctx context.Context, projectID, keyID string) error
+	ListAuditLog(ctx context.Context, projectID string, limit, offset int) ([]repository.AuditLogEntry, error)
 }
 
 var _ Service = (*service.Service)(nil)
