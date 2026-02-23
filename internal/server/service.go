@@ -30,6 +30,7 @@ type Service interface {
 	ResolveBatch(ctx context.Context, requests []service.ResolveRequest) ([]service.ResolveResult, error)
 	ListEventsSince(ctx context.Context, projectID string, eventID int64) ([]repository.FlagEvent, error)
 	ListEventsSinceForKey(ctx context.Context, projectID string, eventID int64, key string) ([]repository.FlagEvent, error)
+	ListAuditLog(ctx context.Context, projectID string, limit, offset int) ([]repository.AuditLogEntry, error)
 }
 
 var _ Service = (*service.Service)(nil)
