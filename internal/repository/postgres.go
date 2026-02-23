@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	defaultNotifyChannel = "flag_events"
-	maxEventBatchSize    = 1000
+	defaultNotifyChannel  = "flag_events"
+	defaultEventBatchSize = 1000
 )
 
 // Flag is the repository-level representation of a feature flag row.
@@ -87,23 +87,42 @@ type FlagEvent struct {
 // a pgxpool connection pool. It also supports LISTEN/NOTIFY for real-time
 // cache invalidation.
 type PostgresRepository struct {
-	pool          *pgxpool.Pool
-	notifyChannel string
+	pool           *pgxpool.Pool
+	notifyChannel  string
+	eventBatchSize int
+}
+
+// RepoOption configures optional PostgresRepository parameters.
+type RepoOption func(*PostgresRepository)
+
+// WithEventBatchSize sets the maximum number of events returned by
+// ListEventsSince/ListEventsSinceForKey. Defaults to 1000.
+func WithEventBatchSize(size int) RepoOption {
+	return func(r *PostgresRepository) {
+		if size > 0 {
+			r.eventBatchSize = size
+		}
+	}
 }
 
 // NewPostgresRepository creates a [PostgresRepository] using the default
 // "flag_events" notification channel.
-func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
-	return NewPostgresRepositoryWithChannel(pool, defaultNotifyChannel)
+func NewPostgresRepository(pool *pgxpool.Pool, opts ...RepoOption) *PostgresRepository {
+	return NewPostgresRepositoryWithChannel(pool, defaultNotifyChannel, opts...)
 }
 
 // NewPostgresRepositoryWithChannel creates a [PostgresRepository] using the
 // specified LISTEN/NOTIFY channel name for flag event notifications.
-func NewPostgresRepositoryWithChannel(pool *pgxpool.Pool, notifyChannel string) *PostgresRepository {
-	return &PostgresRepository{
-		pool:          pool,
-		notifyChannel: normalizeNotifyChannel(notifyChannel),
+func NewPostgresRepositoryWithChannel(pool *pgxpool.Pool, notifyChannel string, opts ...RepoOption) *PostgresRepository {
+	r := &PostgresRepository{
+		pool:           pool,
+		notifyChannel:  normalizeNotifyChannel(notifyChannel),
+		eventBatchSize: defaultEventBatchSize,
 	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // CreateFlag inserts a new flag row and returns the created record with
@@ -269,8 +288,8 @@ func (r *PostgresRepository) ValidateAPIKey(ctx context.Context, id string) (str
 	return keyHash, projectID, nil
 }
 
-// ListEventsSince returns up to 1000 flag events with IDs greater than
-// eventID, ordered by event ID.
+// ListEventsSince returns up to the configured event batch size (default 1000)
+// flag events with IDs greater than eventID, ordered by event ID.
 func (r *PostgresRepository) ListEventsSince(ctx context.Context, projectID string, eventID int64) ([]FlagEvent, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT event_id, project_id, flag_key, event_type, payload, created_at
@@ -278,7 +297,7 @@ func (r *PostgresRepository) ListEventsSince(ctx context.Context, projectID stri
 		WHERE event_id > $1 AND project_id = $2
 		ORDER BY event_id
 		LIMIT $3
-	`, eventID, projectID, maxEventBatchSize)
+	`, eventID, projectID, r.eventBatchSize)
 	if err != nil {
 		return nil, fmt.Errorf("list events since: %w", err)
 	}
@@ -308,9 +327,10 @@ func (r *PostgresRepository) ListEventsSince(ctx context.Context, projectID stri
 	return events, nil
 }
 
-// ListEventsSinceForKey returns up to maxEventBatchSize flag events with IDs greater than
-// eventID for the specified project and flag key. Including projectID in the filter ensures
-// that events are correctly scoped when different projects reuse the same flag keys.
+// ListEventsSinceForKey returns up to the configured event batch size (default
+// 1000) flag events with IDs greater than eventID for the specified project and
+// flag key. Including projectID in the filter ensures that events are correctly
+// scoped when different projects reuse the same flag keys.
 func (r *PostgresRepository) ListEventsSinceForKey(ctx context.Context, projectID string, eventID int64, key string) ([]FlagEvent, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT event_id, project_id, flag_key, event_type, payload, created_at
@@ -319,7 +339,7 @@ func (r *PostgresRepository) ListEventsSinceForKey(ctx context.Context, projectI
 		  AND project_id = $2 AND flag_key = $3
 		ORDER BY event_id
 		LIMIT $4
-	`, eventID, projectID, key, maxEventBatchSize)
+	`, eventID, projectID, key, r.eventBatchSize)
 	if err != nil {
 		return nil, fmt.Errorf("list events since for key: %w", err)
 	}
