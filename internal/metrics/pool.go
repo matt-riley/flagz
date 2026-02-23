@@ -20,23 +20,23 @@ func RegisterPoolMetrics(reg prometheus.Registerer, pool *pgxpool.Pool) {
 	reg.MustRegister(&poolCollector{
 		pool: pool,
 		acquiredConns: prometheus.NewDesc(
-			"flagz_db_pool_acquired_conns",
-			"Number of currently acquired connections in the pool.",
+			"flagz_db_pool_acquired",
+			"Number of currently acquired database connections.",
 			nil, nil,
 		),
 		idleConns: prometheus.NewDesc(
-			"flagz_db_pool_idle_conns",
-			"Number of currently idle connections in the pool.",
+			"flagz_db_pool_idle",
+			"Number of idle database connections in the pool.",
 			nil, nil,
 		),
 		totalConns: prometheus.NewDesc(
-			"flagz_db_pool_total_conns",
-			"Total number of connections currently in the pool.",
+			"flagz_db_pool_total",
+			"Total number of database connections in the pool.",
 			nil, nil,
 		),
 		maxConns: prometheus.NewDesc(
-			"flagz_db_pool_max_conns",
-			"Maximum number of connections allowed in the pool.",
+			"flagz_db_pool_max",
+			"Maximum number of database connections allowed in the pool.",
 			nil, nil,
 		),
 	})

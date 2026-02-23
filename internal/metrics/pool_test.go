@@ -29,25 +29,25 @@ func TestRegisterPoolMetrics(t *testing.T) {
 	maxConns := pool.Stat().MaxConns()
 
 	expected := fmt.Sprintf(`
-# HELP flagz_db_pool_acquired_conns Number of currently acquired connections in the pool.
-# TYPE flagz_db_pool_acquired_conns gauge
-flagz_db_pool_acquired_conns 0
-# HELP flagz_db_pool_idle_conns Number of currently idle connections in the pool.
-# TYPE flagz_db_pool_idle_conns gauge
-flagz_db_pool_idle_conns 0
-# HELP flagz_db_pool_max_conns Maximum number of connections allowed in the pool.
-# TYPE flagz_db_pool_max_conns gauge
-flagz_db_pool_max_conns %d
-# HELP flagz_db_pool_total_conns Total number of connections currently in the pool.
-# TYPE flagz_db_pool_total_conns gauge
-flagz_db_pool_total_conns 0
+# HELP flagz_db_pool_acquired Number of currently acquired database connections.
+# TYPE flagz_db_pool_acquired gauge
+flagz_db_pool_acquired 0
+# HELP flagz_db_pool_idle Number of idle database connections in the pool.
+# TYPE flagz_db_pool_idle gauge
+flagz_db_pool_idle 0
+# HELP flagz_db_pool_max Maximum number of database connections allowed in the pool.
+# TYPE flagz_db_pool_max gauge
+flagz_db_pool_max %d
+# HELP flagz_db_pool_total Total number of database connections in the pool.
+# TYPE flagz_db_pool_total gauge
+flagz_db_pool_total 0
 `, maxConns)
 
 	if err := testutil.GatherAndCompare(reg, strings.NewReader(expected),
-		"flagz_db_pool_acquired_conns",
-		"flagz_db_pool_idle_conns",
-		"flagz_db_pool_total_conns",
-		"flagz_db_pool_max_conns",
+		"flagz_db_pool_acquired",
+		"flagz_db_pool_idle",
+		"flagz_db_pool_total",
+		"flagz_db_pool_max",
 	); err != nil {
 		t.Errorf("unexpected metrics output:\n%v", err)
 	}

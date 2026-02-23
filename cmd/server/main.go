@@ -105,25 +105,6 @@ func run() error {
 	)
 	flagspb.RegisterFlagServiceServer(grpcServer, server.NewGRPCServerWithOptions(svc, cfg.StreamPollInterval, m))
 
-	// Periodically update DB pool metrics.
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				stat := pool.Stat()
-				m.SetDBPoolStats(metrics.DBPoolStats{
-					Acquired: float64(stat.AcquiredConns()),
-					Idle:     float64(stat.IdleConns()),
-					Total:    float64(stat.TotalConns()),
-				})
-			}
-		}
-	}()
-
 	// -------------------------------------------------------------------------
 	// Admin Portal (Tailscale)
 	// -------------------------------------------------------------------------
