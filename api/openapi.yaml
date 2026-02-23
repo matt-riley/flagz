@@ -235,6 +235,12 @@ paths:
                     items:
                       $ref: '#/components/schemas/Flag'
                   - $ref: '#/components/schemas/PaginatedFlagsResponse'
+        '400':
+          description: Bad Request. Invalid query parameter value.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized. Did you forget your token?
           content:

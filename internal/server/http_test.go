@@ -463,8 +463,10 @@ func TestHTTPHandlerListFlagsPaginationWithLimit(t *testing.T) {
 }
 
 func TestHTTPHandlerListFlagsPaginationWithInvalidLimit(t *testing.T) {
+	called := false
 	svc := &fakeService{
 		listFlagsFunc: func(_ context.Context, _ string) ([]repository.Flag, error) {
+			called = true
 			return []repository.Flag{
 				{Key: "alpha"},
 				{Key: "beta"},
@@ -485,12 +487,16 @@ func TestHTTPHandlerListFlagsPaginationWithInvalidLimit(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			called = false
 			req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/flags?limit="+tc.query, nil))
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+			}
+			if called {
+				t.Fatal("expected ListFlags not to be called for invalid limit")
 			}
 
 			var got struct {

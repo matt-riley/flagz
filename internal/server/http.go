@@ -221,12 +221,6 @@ func (s *HTTPServer) handleListFlags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flags, err := s.service.ListFlags(r.Context(), projectID)
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
-
 	query := r.URL.Query()
 	cursor := strings.TrimSpace(query.Get("cursor"))
 	_, cursorProvided := query["cursor"]
@@ -235,15 +229,22 @@ func (s *HTTPServer) handleListFlags(w http.ResponseWriter, r *http.Request) {
 	_, limitProvided := query["limit"]
 	if limitProvided {
 		if l := strings.TrimSpace(query.Get("limit")); l != "" {
-			limit, err = strconv.Atoi(l)
-			if err != nil || limit < 1 {
+			parsedLimit, err := strconv.Atoi(l)
+			if err != nil || parsedLimit < 1 {
 				writeJSONError(w, http.StatusBadRequest, "limit must be a positive integer")
 				return
 			}
+			limit = parsedLimit
 		}
 		if limit > 1000 {
 			limit = 1000
 		}
+	}
+
+	flags, err := s.service.ListFlags(r.Context(), projectID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
 	}
 
 	// Apply cursor-based pagination when either parameter is provided.
