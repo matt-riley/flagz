@@ -7,6 +7,7 @@ package tracing
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -31,16 +32,15 @@ func Init(ctx context.Context) (shutdown func(context.Context) error, err error)
 	if endpoint == "" {
 		return func(context.Context) error { return nil }, nil
 	}
-
-	serviceName := strings.TrimSpace(os.Getenv("OTEL_SERVICE_NAME"))
-	if serviceName == "" {
-		serviceName = defaultServiceName
+	if _, err := parseOTLPEndpoint(endpoint); err != nil {
+		return nil, err
 	}
+
+	serviceName := serviceNameFromEnv()
 
 	res, err := resource.Merge(
 		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
+		resource.NewSchemaless(
 			semconv.ServiceName(serviceName),
 		),
 	)
@@ -65,4 +65,23 @@ func Init(ctx context.Context) (shutdown func(context.Context) error, err error)
 	))
 
 	return tp.Shutdown, nil
+}
+
+func serviceNameFromEnv() string {
+	serviceName := strings.TrimSpace(os.Getenv("OTEL_SERVICE_NAME"))
+	if serviceName == "" {
+		return defaultServiceName
+	}
+	return serviceName
+}
+
+func parseOTLPEndpoint(endpoint string) (*url.URL, error) {
+	parsedEndpoint, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("invalid OTLP endpoint: %w", err)
+	}
+	if parsedEndpoint.Scheme == "" || parsedEndpoint.Host == "" {
+		return nil, fmt.Errorf("invalid OTLP endpoint: %q must include scheme and host", endpoint)
+	}
+	return parsedEndpoint, nil
 }
