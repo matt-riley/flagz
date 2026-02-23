@@ -23,6 +23,7 @@ type Service interface {
 	CreateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error)
 	UpdateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error)
 	GetFlag(ctx context.Context, projectID, key string) (repository.Flag, error)
+	// ListFlags returns flags sorted by key.
 	ListFlags(ctx context.Context, projectID string) ([]repository.Flag, error)
 	DeleteFlag(ctx context.Context, projectID, key string) error
 	ResolveBoolean(ctx context.Context, projectID, key string, evalContext core.EvaluationContext, defaultValue bool) (bool, error)
