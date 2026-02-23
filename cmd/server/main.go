@@ -86,6 +86,7 @@ func run() error {
 
 	repo := repository.NewPostgresRepository(pool, repository.WithEventBatchSize(cfg.EventBatchSize))
 	m := metrics.New()
+	metrics.RegisterPoolMetrics(m.Registry, pool)
 	svc, err := service.New(ctx, repo,
 		service.WithLogger(log),
 		service.WithCacheMetrics(m.IncCacheLoads, m.IncCacheInvalidations, m.ResetCacheSize, m.SetCacheSize),
@@ -123,25 +124,6 @@ func run() error {
 		),
 	)
 	flagspb.RegisterFlagServiceServer(grpcServer, server.NewGRPCServerWithOptions(svc, cfg.StreamPollInterval, m))
-
-	// Periodically update DB pool metrics.
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				stat := pool.Stat()
-				m.SetDBPoolStats(metrics.DBPoolStats{
-					Acquired: float64(stat.AcquiredConns()),
-					Idle:     float64(stat.IdleConns()),
-					Total:    float64(stat.TotalConns()),
-				})
-			}
-		}
-	}()
 
 	// -------------------------------------------------------------------------
 	// Admin Portal (Tailscale)

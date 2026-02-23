@@ -73,22 +73,6 @@ func TestResetCacheSize(t *testing.T) {
 	}
 }
 
-func TestSetDBPoolStats(t *testing.T) {
-	m := New()
-
-	m.SetDBPoolStats(DBPoolStats{Acquired: 3, Idle: 7, Total: 10})
-
-	if v := testutil.ToFloat64(m.DBPoolAcquired); v != 3 {
-		t.Fatalf("expected acquired 3, got %v", v)
-	}
-	if v := testutil.ToFloat64(m.DBPoolIdle); v != 7 {
-		t.Fatalf("expected idle 7, got %v", v)
-	}
-	if v := testutil.ToFloat64(m.DBPoolTotal); v != 10 {
-		t.Fatalf("expected total 10, got %v", v)
-	}
-}
-
 func TestHandler(t *testing.T) {
 	m := New()
 	m.CacheLoadsTotal.Inc()

@@ -21,19 +21,16 @@ import (
 type Metrics struct {
 	Registry *prometheus.Registry
 
-	HTTPRequestsTotal    *prometheus.CounterVec
-	HTTPRequestDuration  *prometheus.HistogramVec
-	GRPCRequestsTotal    *prometheus.CounterVec
-	GRPCRequestDuration  *prometheus.HistogramVec
-	CacheSize            *prometheus.GaugeVec
-	CacheLoadsTotal      prometheus.Counter
-	CacheInvalidations   prometheus.Counter
-	EvaluationsTotal     *prometheus.CounterVec
-	AuthFailuresTotal    prometheus.Counter
-	ActiveStreams         *prometheus.GaugeVec
-	DBPoolAcquired       prometheus.Gauge
-	DBPoolIdle           prometheus.Gauge
-	DBPoolTotal          prometheus.Gauge
+	HTTPRequestsTotal   *prometheus.CounterVec
+	HTTPRequestDuration *prometheus.HistogramVec
+	GRPCRequestsTotal   *prometheus.CounterVec
+	GRPCRequestDuration *prometheus.HistogramVec
+	CacheSize           *prometheus.GaugeVec
+	CacheLoadsTotal     prometheus.Counter
+	CacheInvalidations  prometheus.Counter
+	EvaluationsTotal    *prometheus.CounterVec
+	AuthFailuresTotal   prometheus.Counter
+	ActiveStreams       *prometheus.GaugeVec
 }
 
 // New creates and registers all flagz metrics in a fresh registry.
@@ -94,21 +91,6 @@ func New() *Metrics {
 			Name: "flagz_active_streams",
 			Help: "Number of active streaming connections.",
 		}, []string{"transport"}),
-
-		DBPoolAcquired: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "flagz_db_pool_acquired",
-			Help: "Number of currently acquired database connections.",
-		}),
-
-		DBPoolIdle: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "flagz_db_pool_idle",
-			Help: "Number of idle database connections in the pool.",
-		}),
-
-		DBPoolTotal: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "flagz_db_pool_total",
-			Help: "Total number of database connections in the pool.",
-		}),
 	}
 
 	reg.MustRegister(
@@ -122,9 +104,6 @@ func New() *Metrics {
 		m.EvaluationsTotal,
 		m.AuthFailuresTotal,
 		m.ActiveStreams,
-		m.DBPoolAcquired,
-		m.DBPoolIdle,
-		m.DBPoolTotal,
 	)
 
 	return m
@@ -191,18 +170,4 @@ func (m *Metrics) IncCacheLoads() {
 // IncCacheInvalidations increments the cache invalidation counter.
 func (m *Metrics) IncCacheInvalidations() {
 	m.CacheInvalidations.Inc()
-}
-
-// DBPoolStats holds connection pool statistics for metric updates.
-type DBPoolStats struct {
-	Acquired float64
-	Idle     float64
-	Total    float64
-}
-
-// SetDBPoolStats updates the DB pool gauges.
-func (m *Metrics) SetDBPoolStats(stats DBPoolStats) {
-	m.DBPoolAcquired.Set(stats.Acquired)
-	m.DBPoolIdle.Set(stats.Idle)
-	m.DBPoolTotal.Set(stats.Total)
 }
