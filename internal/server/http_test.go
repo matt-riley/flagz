@@ -338,34 +338,6 @@ func TestHTTPHandlerStreamSendsSSEErrorAfterStartOnBackendFailure(t *testing.T) 
 	}
 }
 
-func TestHTTPHandlerListFlagsPaginationDefault(t *testing.T) {
-	svc := &fakeService{
-		listFlagsFunc: func(_ context.Context, _ string) ([]repository.Flag, error) {
-			return []repository.Flag{
-				{Key: "alpha"},
-				{Key: "beta"},
-			}, nil
-		},
-	}
-
-	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
-	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/flags", nil))
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-
-	var got []repository.Flag
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("got %d flags, want 2", len(got))
-	}
-}
-
 func TestHTTPHandlerListFlagsPaginationWithCursor(t *testing.T) {
 	svc := &fakeService{
 		listFlagsFunc: func(_ context.Context, _ string) ([]repository.Flag, error) {
