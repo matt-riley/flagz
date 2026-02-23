@@ -228,14 +228,17 @@ func (s *HTTPServer) handleListFlags(w http.ResponseWriter, r *http.Request) {
 	limit := 0
 	_, limitProvided := query["limit"]
 	if limitProvided {
-		if l := strings.TrimSpace(query.Get("limit")); l != "" {
-			parsedLimit, err := strconv.Atoi(l)
-			if err != nil || parsedLimit < 1 {
-				writeJSONError(w, http.StatusBadRequest, "limit must be a positive integer")
-				return
-			}
-			limit = parsedLimit
+		l := strings.TrimSpace(query.Get("limit"))
+		if l == "" {
+			writeJSONError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
 		}
+		parsedLimit, err := strconv.Atoi(l)
+		if err != nil || parsedLimit < 1 {
+			writeJSONError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		limit = parsedLimit
 		if limit > 1000 {
 			limit = 1000
 		}

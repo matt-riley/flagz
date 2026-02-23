@@ -480,6 +480,7 @@ func TestHTTPHandlerListFlagsPaginationWithInvalidLimit(t *testing.T) {
 		name  string
 		query string
 	}{
+		{name: "empty", query: ""},
 		{name: "zero", query: "0"},
 		{name: "negative", query: "-1"},
 		{name: "non-integer", query: "notanint"},
