@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -392,6 +393,180 @@ func TestStreamBearerAuthInterceptor(t *testing.T) {
 	})
 }
 
+func TestHTTPBearerAuthMiddleware_RateLimiting(t *testing.T) {
+	t.Run("successful auth does not consume rate limit tokens", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		rl := NewRateLimiter(ctx, 2)
+		defer rl.Stop()
+
+		validator := &testTokenValidator{expectedToken: "good", projectID: "proj-1"}
+		handler := HTTPBearerAuthMiddleware(validator, WithRateLimiter(rl))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		for i := 0; i < 5; i++ {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = "10.0.0.1:1234"
+			req.Header.Set("Authorization", "Bearer good")
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("request %d: expected 200, got %d", i, rec.Code)
+			}
+		}
+	})
+
+	t.Run("failed auth increments rate limiter", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		rl := NewRateLimiter(ctx, 2)
+		defer rl.Stop()
+
+		validator := &testTokenValidator{expectedToken: "good", projectID: "proj-1"}
+		handler := HTTPBearerAuthMiddleware(validator, WithRateLimiter(rl))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		// Two failed attempts should consume the burst tokens
+		for i := 0; i < 2; i++ {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = "10.0.0.1:1234"
+			req.Header.Set("Authorization", "Bearer bad")
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("request %d: expected 401, got %d", i, rec.Code)
+			}
+		}
+
+		// Third failed attempt should be rate-limited
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "10.0.0.1:1234"
+		req.Header.Set("Authorization", "Bearer bad")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("expected 429, got %d", rec.Code)
+		}
+	})
+
+	t.Run("empty remote addr does not use rate limiter", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		rl := NewRateLimiter(ctx, 1)
+		defer rl.Stop()
+
+		validator := &testTokenValidator{expectedToken: "good", projectID: "proj-1"}
+		handler := HTTPBearerAuthMiddleware(validator, WithRateLimiter(rl))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		for i := 0; i < 3; i++ {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = ""
+			req.Header.Set("Authorization", "Bearer bad")
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("request %d: expected 401, got %d", i, rec.Code)
+			}
+		}
+	})
+}
+
+func TestUnaryBearerAuthInterceptor_RateLimiting(t *testing.T) {
+	t.Run("successful auth does not consume rate limit tokens", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		rl := NewRateLimiter(ctx, 2)
+		defer rl.Stop()
+
+		validator := &testTokenValidator{expectedToken: "good", projectID: "proj-1"}
+		interceptor := UnaryBearerAuthInterceptor(validator, WithRateLimiter(rl))
+		grpcCtx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer good"))
+
+		for i := 0; i < 5; i++ {
+			_, err := interceptor(grpcCtx, struct{}{}, &grpc.UnaryServerInfo{}, func(ctx context.Context, req any) (any, error) {
+				return "ok", nil
+			})
+			if err != nil {
+				t.Fatalf("request %d: unexpected error %v", i, err)
+			}
+		}
+	})
+
+	t.Run("exceeding rate limit returns ResourceExhausted", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		rl := NewRateLimiter(ctx, 2)
+		defer rl.Stop()
+
+		validator := &testTokenValidator{expectedToken: "good", projectID: "proj-1"}
+		interceptor := UnaryBearerAuthInterceptor(validator, WithRateLimiter(rl))
+		grpcCtx := metadata.NewIncomingContext(
+			peer.NewContext(context.Background(), &peer.Peer{Addr: fakeAddr("10.0.0.1:5000")}),
+			metadata.Pairs("authorization", "Bearer bad"),
+		)
+
+		// Exhaust burst tokens
+		for i := 0; i < 2; i++ {
+			_, err := interceptor(grpcCtx, struct{}{}, &grpc.UnaryServerInfo{}, func(ctx context.Context, req any) (any, error) {
+				return nil, nil
+			})
+			if status.Code(err) != codes.Unauthenticated {
+				t.Fatalf("request %d: expected Unauthenticated, got %v", i, err)
+			}
+		}
+
+		// Next should be rate-limited
+		_, err := interceptor(grpcCtx, struct{}{}, &grpc.UnaryServerInfo{}, func(ctx context.Context, req any) (any, error) {
+			return nil, nil
+		})
+		if status.Code(err) != codes.ResourceExhausted {
+			t.Fatalf("expected ResourceExhausted, got %v", status.Code(err))
+		}
+	})
+}
+
+func TestStreamBearerAuthInterceptor_RateLimiting(t *testing.T) {
+	t.Run("exceeding rate limit returns ResourceExhausted", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		rl := NewRateLimiter(ctx, 2)
+		defer rl.Stop()
+
+		validator := &testTokenValidator{expectedToken: "good", projectID: "proj-1"}
+		interceptor := StreamBearerAuthInterceptor(validator, WithRateLimiter(rl))
+		grpcCtx := metadata.NewIncomingContext(
+			peer.NewContext(context.Background(), &peer.Peer{Addr: fakeAddr("10.0.0.1:5000")}),
+			metadata.Pairs("authorization", "Bearer bad"),
+		)
+
+		for i := 0; i < 2; i++ {
+			err := interceptor(nil, &testServerStream{ctx: grpcCtx}, &grpc.StreamServerInfo{}, func(any, grpc.ServerStream) error {
+				return nil
+			})
+			if status.Code(err) != codes.Unauthenticated {
+				t.Fatalf("request %d: expected Unauthenticated, got %v", i, err)
+			}
+		}
+
+		err := interceptor(nil, &testServerStream{ctx: grpcCtx}, &grpc.StreamServerInfo{}, func(any, grpc.ServerStream) error {
+			return nil
+		})
+		if status.Code(err) != codes.ResourceExhausted {
+			t.Fatalf("expected ResourceExhausted, got %v", status.Code(err))
+		}
+	})
+}
+
+// fakeAddr implements net.Addr for testing gRPC peer context.
+type fakeAddr string
+
+func (a fakeAddr) Network() string { return "tcp" }
+func (a fakeAddr) String() string  { return string(a) }
+
 func TestAPIKeyMatchesHash(t *testing.T) {
 	hash, err := HashAPIKey("secret")
 	if err != nil {
@@ -597,7 +772,7 @@ type testTokenValidator struct {
 	err           error
 	called        bool
 	gotToken      string
-	projectID string
+	projectID     string
 }
 
 func (v *testTokenValidator) ValidateToken(_ context.Context, token string) (string, error) {

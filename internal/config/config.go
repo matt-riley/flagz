@@ -30,6 +30,7 @@ const (
 	defaultGRPCAddr                  = ":9090"
 	defaultStreamPollInterval        = time.Second
 	defaultTSStateDir                = "tsnet-state"
+	defaultAuthRateLimit             = 10
 	defaultMaxJSONBodySize     int64 = 1 << 20 // 1MB
 	defaultEventBatchSize            = 1000
 	defaultCacheResyncInterval       = time.Minute
@@ -42,6 +43,7 @@ type Config struct {
 	GRPCAddr            string
 	StreamPollInterval  time.Duration
 	LogLevel            string
+	AuthRateLimit       int
 	AdminHostname       string
 	TSAuthKey           string
 	TSStateDir          string
@@ -72,6 +74,18 @@ func Load() (Config, error) {
 			return Config{}, errors.New("STREAM_POLL_INTERVAL must be > 0")
 		}
 		streamPollInterval = parsed
+	}
+
+	authRateLimit := defaultAuthRateLimit
+	if value := strings.TrimSpace(os.Getenv("AUTH_RATE_LIMIT")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse AUTH_RATE_LIMIT: %w", err)
+		}
+		if parsed <= 0 {
+			return Config{}, errors.New("AUTH_RATE_LIMIT must be > 0")
+		}
+		authRateLimit = parsed
 	}
 
 	// Admin Portal Config
@@ -119,6 +133,7 @@ func Load() (Config, error) {
 		GRPCAddr:            envOrDefault("GRPC_ADDR", defaultGRPCAddr),
 		StreamPollInterval:  streamPollInterval,
 		LogLevel:            envOrDefault("LOG_LEVEL", "info"),
+		AuthRateLimit:       authRateLimit,
 		AdminHostname:       adminHostname,
 		TSAuthKey:           os.Getenv("TS_AUTH_KEY"),
 		TSStateDir:          envOrDefault("TS_STATE_DIR", defaultTSStateDir),
