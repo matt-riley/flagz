@@ -450,6 +450,29 @@ func TestHTTPBearerAuthMiddleware_RateLimiting(t *testing.T) {
 			t.Fatalf("expected 429, got %d", rec.Code)
 		}
 	})
+
+	t.Run("empty remote addr does not use rate limiter", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		rl := NewRateLimiter(ctx, 1)
+		defer rl.Stop()
+
+		validator := &testTokenValidator{expectedToken: "good", projectID: "proj-1"}
+		handler := HTTPBearerAuthMiddleware(validator, WithRateLimiter(rl))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		for i := 0; i < 3; i++ {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = ""
+			req.Header.Set("Authorization", "Bearer bad")
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("request %d: expected 401, got %d", i, rec.Code)
+			}
+		}
+	})
 }
 
 func TestUnaryBearerAuthInterceptor_RateLimiting(t *testing.T) {
@@ -749,7 +772,7 @@ type testTokenValidator struct {
 	err           error
 	called        bool
 	gotToken      string
-	projectID string
+	projectID     string
 }
 
 func (v *testTokenValidator) ValidateToken(_ context.Context, token string) (string, error) {

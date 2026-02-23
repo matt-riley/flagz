@@ -57,10 +57,11 @@ func HTTPBearerAuthMiddleware(validator TokenValidator, opts ...AuthOption) func
 					cfg.onFailure()
 				}
 				if cfg.rateLimiter != nil {
-					ip := ExtractIP(r.RemoteAddr)
-					if !cfg.rateLimiter.RecordFailureAndAllow(ip) {
-						http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
-						return
+					if ip := ExtractIP(r.RemoteAddr); ip != "" {
+						if !cfg.rateLimiter.RecordFailureAndAllow(ip) {
+							http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
+							return
+						}
 					}
 				}
 				writeHTTPUnauthorized(w)
@@ -225,7 +226,7 @@ func authorizeGRPC(ctx context.Context, validator TokenValidator) (string, error
 		projectID, err := validator.ValidateToken(ctx, token)
 		if err == nil {
 			if strings.TrimSpace(projectID) == "" {
-				return "", errInvalidAuthorizationHeader
+				continue
 			}
 			return projectID, nil
 		}
