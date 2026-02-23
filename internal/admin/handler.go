@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 	"github.com/matt-riley/flagz/internal/service"
 )
@@ -105,6 +106,7 @@ func (h *Handler) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 		ctx := r.Context()
 		ctx = context.WithValue(ctx, sessionContextKey, session)
+		ctx = middleware.NewContextWithAdminUserID(ctx, session.AdminUserID)
 		next(w, r.WithContext(ctx))
 	}
 }
@@ -243,7 +245,7 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 				remoteAddr = strings.TrimSpace(first)
 			}
 		}
-		
+
 		if allowed := h.SessionMgr.CheckLoginRateLimit(remoteAddr); !allowed {
 			if err := Render(w, "login.html", map[string]any{"Error": "Too many attempts. Please try again later."}); err != nil {
 				h.log.Error("render error", "error", err)
@@ -411,7 +413,7 @@ func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *r
 			Variants:    []byte("null"), // Default null variants
 			Rules:       []byte("[]"),   // Default empty rules
 		}
-		
+
 		_, err := h.Service.CreateFlag(r.Context(), flag)
 		if err != nil {
 			http.Error(w, "Failed to create flag: "+err.Error(), http.StatusInternalServerError)
@@ -435,7 +437,7 @@ func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *r
 			http.NotFound(w, r)
 			return
 		}
-		
+
 		repoFlag.Enabled = !repoFlag.Enabled
 		_, err = h.Service.UpdateFlag(r.Context(), repoFlag)
 		if err != nil {
@@ -471,14 +473,14 @@ func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *r
 		http.Redirect(w, r, fmt.Sprintf("/projects/%s", project.ID), http.StatusFound)
 		return
 	}
-	
+
 	// DELETE /projects/{id}/flags/{key}
 	if len(subPath) == 1 && r.Method == "DELETE" {
 		if err := h.Service.DeleteFlag(r.Context(), project.ID, flagKey); err != nil {
 			http.Error(w, "Failed to delete flag", http.StatusInternalServerError)
 			return
 		}
-		
+
 		if r.Header.Get("HX-Request") == "true" {
 			w.WriteHeader(http.StatusOK) // Empty response removes the element
 			return

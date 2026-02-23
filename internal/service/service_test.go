@@ -562,6 +562,44 @@ func TestServiceAuditLogRecordedOnMutations(t *testing.T) {
 	}
 }
 
+func TestServiceAuditLogIncludesActorIDsFromContext(t *testing.T) {
+	ctx := middleware.NewContextWithProjectID(context.Background(), "proj1")
+	ctx = middleware.NewContextWithAPIKeyID(ctx, "api-key-1")
+	ctx = middleware.NewContextWithAdminUserID(ctx, "admin-user-1")
+	repo := newFakeServiceRepository()
+
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	flag := repository.Flag{
+		ProjectID:   "proj1",
+		Key:         "actor-ids",
+		Description: "test",
+		Enabled:     true,
+		Variants:    json.RawMessage(`{}`),
+		Rules:       json.RawMessage(`[]`),
+	}
+
+	if _, err := svc.CreateFlag(ctx, flag); err != nil {
+		t.Fatalf("CreateFlag() error = %v", err)
+	}
+
+	repo.mu.RLock()
+	defer repo.mu.RUnlock()
+
+	if len(repo.auditLogs) != 1 {
+		t.Fatalf("audit log count = %d, want 1", len(repo.auditLogs))
+	}
+	if repo.auditLogs[0].APIKeyID != "api-key-1" {
+		t.Fatalf("audit log APIKeyID = %q, want %q", repo.auditLogs[0].APIKeyID, "api-key-1")
+	}
+	if repo.auditLogs[0].AdminUserID != "admin-user-1" {
+		t.Fatalf("audit log AdminUserID = %q, want %q", repo.auditLogs[0].AdminUserID, "admin-user-1")
+	}
+}
+
 func TestServiceMutationSucceedsWhenAuditLogFails(t *testing.T) {
 	ctx := middleware.NewContextWithProjectID(context.Background(), "proj1")
 	repo := newFakeServiceRepository()

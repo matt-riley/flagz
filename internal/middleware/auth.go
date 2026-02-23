@@ -155,8 +155,9 @@ func (w *wrappedServerStream) Context() context.Context {
 type contextKey string
 
 const (
-	projectIDKey contextKey = "project_id"
-	apiKeyIDKey  contextKey = "api_key_id"
+	projectIDKey   contextKey = "project_id"
+	apiKeyIDKey    contextKey = "api_key_id"
+	adminUserIDKey contextKey = "admin_user_id"
 )
 
 // ProjectIDFromContext retrieves the project ID from the context.
@@ -179,6 +180,17 @@ func APIKeyIDFromContext(ctx context.Context) (string, bool) {
 // NewContextWithAPIKeyID returns a new context with the given API key ID.
 func NewContextWithAPIKeyID(ctx context.Context, keyID string) context.Context {
 	return context.WithValue(ctx, apiKeyIDKey, keyID)
+}
+
+// AdminUserIDFromContext retrieves the admin user ID from the context.
+func AdminUserIDFromContext(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(adminUserIDKey).(string)
+	return id, ok
+}
+
+// NewContextWithAdminUserID returns a new context with the given admin user ID.
+func NewContextWithAdminUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, adminUserIDKey, userID)
 }
 
 func authorizeHTTP(ctx context.Context, authorizationHeader string, validator TokenValidator) (string, error) {

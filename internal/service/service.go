@@ -609,12 +609,14 @@ func (s *Service) ListAuditLog(ctx context.Context, projectID string, limit, off
 
 func (s *Service) insertAuditLogBestEffort(ctx context.Context, projectID, action, flagKey string) {
 	apiKeyID, _ := middleware.APIKeyIDFromContext(ctx)
+	adminUserID, _ := middleware.AdminUserIDFromContext(ctx)
 	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), bestEffortTimeout)
 	defer cancel()
 	_ = s.repo.InsertAuditLog(bgCtx, repository.AuditLogEntry{
-		ProjectID: projectID,
-		APIKeyID:  apiKeyID,
-		Action:    action,
-		FlagKey:   flagKey,
+		ProjectID:   projectID,
+		APIKeyID:    apiKeyID,
+		AdminUserID: adminUserID,
+		Action:      action,
+		FlagKey:     flagKey,
 	})
 }
