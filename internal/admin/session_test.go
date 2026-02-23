@@ -125,11 +125,23 @@ func TestClearSessionCookie(t *testing.T) {
 	}
 
 	cookie := cookies[0]
+	if cookie.Name != sessionCookieName {
+		t.Fatalf("cleared cookie name = %q, want %q", cookie.Name, sessionCookieName)
+	}
 	if cookie.Value != "" {
 		t.Fatalf("cleared cookie should have empty value, got %q", cookie.Value)
 	}
+	if cookie.Path != "/" {
+		t.Fatalf("cleared cookie path = %q, want /", cookie.Path)
+	}
 	if cookie.MaxAge != -1 {
 		t.Fatalf("cleared cookie MaxAge = %d, want -1", cookie.MaxAge)
+	}
+	if !cookie.HttpOnly {
+		t.Fatal("cleared cookie should be HttpOnly")
+	}
+	if cookie.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("cleared cookie SameSite = %v, want Lax", cookie.SameSite)
 	}
 }
 
