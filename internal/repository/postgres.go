@@ -16,7 +16,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/crypto/bcrypt"
+
+	"github.com/matt-riley/flagz/internal/middleware"
 )
 
 const (
@@ -325,7 +326,7 @@ func (r *PostgresRepository) CreateAPIKey(ctx context.Context, projectID string)
 		return "", "", fmt.Errorf("generate secret: %w", err)
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
+	hash, err := middleware.HashAPIKey(secret)
 	if err != nil {
 		return "", "", fmt.Errorf("hash api key: %w", err)
 	}
@@ -333,7 +334,7 @@ func (r *PostgresRepository) CreateAPIKey(ctx context.Context, projectID string)
 	_, err = r.pool.Exec(ctx, `
 		INSERT INTO api_keys (id, project_id, name, key_hash)
 		VALUES ($1, $2, $3, $4)
-	`, keyID, projectID, "api-key-"+keyID[:8], string(hash))
+	`, keyID, projectID, "api-key-"+keyID[:8], hash)
 	if err != nil {
 		return "", "", fmt.Errorf("create api key: %w", err)
 	}

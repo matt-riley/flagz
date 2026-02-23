@@ -520,6 +520,8 @@ func (s *HTTPServer) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"id":     keyID,
 		"secret": keyID + "." + secret,
