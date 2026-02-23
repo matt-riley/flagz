@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.0](https://github.com/matt-riley/flagz/compare/v1.5.0...v1.6.0) (2026-02-23)
+
+
+### Features
+
+* database connection pool metrics ([#40](https://github.com/matt-riley/flagz/issues/40)) ([7db0956](https://github.com/matt-riley/flagz/commit/7db095680445bb0fe6c76569864a0b79e83223db))
+
+
+### Bug Fixes
+
+* **deps:** update module golang.org/x/time to v0.14.0 ([#59](https://github.com/matt-riley/flagz/issues/59)) ([f35f289](https://github.com/matt-riley/flagz/commit/f35f2892da111e72a798513e1d691f5ee0b79e45))
+
 ## [1.5.0](https://github.com/matt-riley/flagz/compare/v1.4.0...v1.5.0) (2026-02-23)
 
 
