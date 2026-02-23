@@ -398,6 +398,38 @@ func TestHTTPHandlerListFlagsPaginationWithCursor(t *testing.T) {
 	}
 }
 
+func TestHTTPHandlerListFlagsPaginationWithEmptyCursorParam(t *testing.T) {
+	svc := &fakeService{
+		listFlagsFunc: func(_ context.Context, _ string) ([]repository.Flag, error) {
+			return []repository.Flag{
+				{Key: "alpha"},
+				{Key: "beta"},
+				{Key: "gamma"},
+			}, nil
+		},
+	}
+
+	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
+	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/flags?cursor=", nil))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var got paginatedFlagsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(got.Flags) != 3 {
+		t.Fatalf("got %d flags, want 3", len(got.Flags))
+	}
+	if got.NextCursor != "" {
+		t.Fatalf("next_cursor = %q, want empty", got.NextCursor)
+	}
+}
+
 func TestHTTPHandlerListFlagsPaginationWithLimit(t *testing.T) {
 	svc := &fakeService{
 		listFlagsFunc: func(_ context.Context, _ string) ([]repository.Flag, error) {
@@ -427,6 +459,50 @@ func TestHTTPHandlerListFlagsPaginationWithLimit(t *testing.T) {
 	}
 	if got.NextCursor != "beta" {
 		t.Fatalf("next_cursor = %q, want %q", got.NextCursor, "beta")
+	}
+}
+
+func TestHTTPHandlerListFlagsPaginationWithInvalidLimit(t *testing.T) {
+	svc := &fakeService{
+		listFlagsFunc: func(_ context.Context, _ string) ([]repository.Flag, error) {
+			return []repository.Flag{
+				{Key: "alpha"},
+				{Key: "beta"},
+				{Key: "gamma"},
+			}, nil
+		},
+	}
+
+	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{name: "zero", query: "0"},
+		{name: "negative", query: "-1"},
+		{name: "non-integer", query: "notanint"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/flags?limit="+tc.query, nil))
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+			}
+
+			var got struct {
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("unmarshal error response: %v", err)
+			}
+			if got.Error != "limit must be a positive integer" {
+				t.Fatalf("error = %q, want %q", got.Error, "limit must be a positive integer")
+			}
+		})
 	}
 }
 

@@ -194,7 +194,7 @@ components:
             $ref: '#/components/schemas/Flag'
         next_cursor:
           type: string
-          description: Cursor for the next page. Empty when no more results.
+          description: Cursor for the next page, if any. Omitted when there are no more results.
       required:
         - flags
 
@@ -214,10 +214,12 @@ paths:
             type: string
         - name: limit
           in: query
-          description: Maximum number of flags to return
+          description: >
+            Maximum number of flags to return when pagination is enabled.
+            If neither cursor nor limit is provided, all flags are returned (no pagination).
+            When pagination is enabled without an explicit limit, a default page size of 100 is used.
           schema:
             type: integer
-            default: 100
             minimum: 1
             maximum: 1000
       responses:

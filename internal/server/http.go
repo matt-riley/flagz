@@ -179,7 +179,7 @@ func (s *HTTPServer) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "key is required")
 		return
 	}
-	
+
 	// Force project ID from context
 	flag.ProjectID = projectID
 
@@ -227,13 +227,19 @@ func (s *HTTPServer) handleListFlags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
+	query := r.URL.Query()
+	cursor := strings.TrimSpace(query.Get("cursor"))
+	_, cursorProvided := query["cursor"]
+
 	limit := 0
-	if l := r.URL.Query().Get("limit"); l != "" {
-		limit, err = strconv.Atoi(l)
-		if err != nil || limit < 1 {
-			writeJSONError(w, http.StatusBadRequest, "limit must be a positive integer")
-			return
+	_, limitProvided := query["limit"]
+	if limitProvided {
+		if l := strings.TrimSpace(query.Get("limit")); l != "" {
+			limit, err = strconv.Atoi(l)
+			if err != nil || limit < 1 {
+				writeJSONError(w, http.StatusBadRequest, "limit must be a positive integer")
+				return
+			}
 		}
 		if limit > 1000 {
 			limit = 1000
@@ -241,10 +247,8 @@ func (s *HTTPServer) handleListFlags(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Apply cursor-based pagination when either parameter is provided.
-	// Sorting is acceptable here because flags come from the in-memory cache.
-	if cursor != "" || limit > 0 {
-		sort.Slice(flags, func(i, j int) bool { return flags[i].Key < flags[j].Key })
-
+	if cursorProvided || limitProvided {
+		// Service.ListFlags returns flags sorted by key.
 		if cursor != "" {
 			idx := sort.Search(len(flags), func(i int) bool { return flags[i].Key > cursor })
 			flags = flags[idx:]
