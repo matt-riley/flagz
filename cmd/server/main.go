@@ -69,11 +69,12 @@ func run() error {
 	}
 	defer pool.Close()
 
-	repo := repository.NewPostgresRepository(pool)
+	repo := repository.NewPostgresRepository(pool, repository.WithEventBatchSize(cfg.EventBatchSize))
 	m := metrics.New()
 	svc, err := service.New(ctx, repo,
 		service.WithLogger(log),
 		service.WithCacheMetrics(m.IncCacheLoads, m.IncCacheInvalidations, m.ResetCacheSize, m.SetCacheSize),
+		service.WithCacheResyncInterval(cfg.CacheResyncInterval),
 	)
 	if err != nil {
 		return fmt.Errorf("init service: %w", err)
@@ -81,7 +82,7 @@ func run() error {
 
 	authFailure := middleware.WithOnAuthFailure(func() { m.AuthFailuresTotal.Inc() })
 	tokenValidator := &apiKeyTokenValidator{lookup: repo}
-	apiHandler := server.NewHTTPHandlerWithOptions(svc, cfg.StreamPollInterval, m)
+	apiHandler := server.NewHTTPHandlerWithOptions(svc, cfg.StreamPollInterval, m, server.WithMaxJSONBodySize(cfg.MaxJSONBodySize))
 	httpHandler := newHTTPHandler(apiHandler, tokenValidator, authFailure)
 
 	httpServer := &http.Server{

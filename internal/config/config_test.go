@@ -39,6 +39,15 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.TSStateDir != "tsnet-state" {
 		t.Errorf("TSStateDir = %q, want tsnet-state", cfg.TSStateDir)
 	}
+	if cfg.MaxJSONBodySize != defaultMaxJSONBodySize {
+		t.Errorf("MaxJSONBodySize = %d, want %d", cfg.MaxJSONBodySize, defaultMaxJSONBodySize)
+	}
+	if cfg.EventBatchSize != defaultEventBatchSize {
+		t.Errorf("EventBatchSize = %d, want %d", cfg.EventBatchSize, defaultEventBatchSize)
+	}
+	if cfg.CacheResyncInterval != defaultCacheResyncInterval {
+		t.Errorf("CacheResyncInterval = %v, want %v", cfg.CacheResyncInterval, defaultCacheResyncInterval)
+	}
 }
 
 func TestLoad_StreamPollInterval_Invalid(t *testing.T) {
@@ -120,6 +129,94 @@ func TestLoad_CustomStreamPollInterval(t *testing.T) {
 	}
 	if cfg.StreamPollInterval != 5*time.Second {
 		t.Errorf("StreamPollInterval = %v, want 5s", cfg.StreamPollInterval)
+	}
+}
+
+func TestLoad_CustomConfigurableLimits(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("ADMIN_HOSTNAME", "")
+	t.Setenv("SESSION_SECRET", "")
+	t.Setenv("MAX_JSON_BODY_SIZE", "2048")
+	t.Setenv("EVENT_BATCH_SIZE", "250")
+	t.Setenv("CACHE_RESYNC_INTERVAL", "30s")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.MaxJSONBodySize != 2048 {
+		t.Errorf("MaxJSONBodySize = %d, want 2048", cfg.MaxJSONBodySize)
+	}
+	if cfg.EventBatchSize != 250 {
+		t.Errorf("EventBatchSize = %d, want 250", cfg.EventBatchSize)
+	}
+	if cfg.CacheResyncInterval != 30*time.Second {
+		t.Errorf("CacheResyncInterval = %v, want 30s", cfg.CacheResyncInterval)
+	}
+}
+
+func TestLoad_MaxJSONBodySize_Invalid(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("ADMIN_HOSTNAME", "")
+	t.Setenv("SESSION_SECRET", "")
+
+	for _, tc := range []string{"not-a-number", "0", "-1"} {
+		t.Run(tc, func(t *testing.T) {
+			t.Setenv("MAX_JSON_BODY_SIZE", tc)
+			_, err := Load()
+			if err == nil {
+				t.Fatalf("Load() should fail for MAX_JSON_BODY_SIZE=%q", tc)
+			}
+		})
+	}
+}
+
+func TestLoad_EventBatchSize_Invalid(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("ADMIN_HOSTNAME", "")
+	t.Setenv("SESSION_SECRET", "")
+
+	for _, tc := range []string{"not-a-number", "0", "-1"} {
+		t.Run(tc, func(t *testing.T) {
+			t.Setenv("EVENT_BATCH_SIZE", tc)
+			_, err := Load()
+			if err == nil {
+				t.Fatalf("Load() should fail for EVENT_BATCH_SIZE=%q", tc)
+			}
+		})
+	}
+}
+
+func TestLoad_CacheResyncInterval_Invalid(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("ADMIN_HOSTNAME", "")
+	t.Setenv("SESSION_SECRET", "")
+	t.Setenv("CACHE_RESYNC_INTERVAL", "not-a-duration")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() should fail for invalid CACHE_RESYNC_INTERVAL")
+	}
+}
+
+func TestLoad_CacheResyncInterval_Zero(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("ADMIN_HOSTNAME", "")
+	t.Setenv("SESSION_SECRET", "")
+	t.Setenv("CACHE_RESYNC_INTERVAL", "0s")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() should fail for zero CACHE_RESYNC_INTERVAL")
+	}
+}
+
+func TestLoad_CacheResyncInterval_Negative(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("ADMIN_HOSTNAME", "")
+	t.Setenv("SESSION_SECRET", "")
+	t.Setenv("CACHE_RESYNC_INTERVAL", "-1s")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() should fail for negative CACHE_RESYNC_INTERVAL")
 	}
 }
 
