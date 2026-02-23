@@ -462,6 +462,103 @@ func TestHTTPHandlerListFlagsPaginationMaxLimitClamped(t *testing.T) {
 	}
 }
 
+func TestHTTPHandlerListFlagsPaginationCursorAndLimit(t *testing.T) {
+	flags := make([]repository.Flag, 10)
+	for i := range flags {
+		flags[i] = repository.Flag{Key: fmt.Sprintf("flag-%04d", i)}
+	}
+	svc := &fakeService{
+		listFlagsFunc: func(_ context.Context, _ string) ([]repository.Flag, error) {
+			return flags, nil
+		},
+	}
+
+	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
+	req := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/flags?cursor=flag-0003&limit=2", nil))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var got paginatedFlagsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(got.Flags) != 2 {
+		t.Fatalf("got %d flags, want 2", len(got.Flags))
+	}
+	if got.Flags[0].Key != "flag-0004" || got.Flags[1].Key != "flag-0005" {
+		t.Fatalf("got keys %q, %q; want flag-0004, flag-0005", got.Flags[0].Key, got.Flags[1].Key)
+	}
+	if got.NextCursor != "flag-0005" {
+		t.Fatalf("next_cursor = %q, want %q", got.NextCursor, "flag-0005")
+	}
+}
+
+func TestHTTPHandlerListFlagsPaginationProgression(t *testing.T) {
+	flags := make([]repository.Flag, 5)
+	for i := range flags {
+		flags[i] = repository.Flag{Key: fmt.Sprintf("flag-%04d", i)}
+	}
+	svc := &fakeService{
+		listFlagsFunc: func(_ context.Context, _ string) ([]repository.Flag, error) {
+			return flags, nil
+		},
+	}
+
+	handler := NewHTTPHandlerWithStreamPollInterval(svc, 5*time.Millisecond)
+
+	// Page 1: limit=2, no cursor → flag-0000, flag-0001
+	req1 := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/flags?limit=2", nil))
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+
+	var page1 paginatedFlagsResponse
+	if err := json.Unmarshal(rec1.Body.Bytes(), &page1); err != nil {
+		t.Fatalf("page 1 unmarshal: %v", err)
+	}
+	if len(page1.Flags) != 2 || page1.Flags[0].Key != "flag-0000" || page1.Flags[1].Key != "flag-0001" {
+		t.Fatalf("page 1 unexpected: %v", page1.Flags)
+	}
+	if page1.NextCursor == "" {
+		t.Fatal("page 1 next_cursor should be set")
+	}
+
+	// Page 2: cursor from page 1
+	req2 := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/flags?cursor="+page1.NextCursor+"&limit=2", nil))
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+
+	var page2 paginatedFlagsResponse
+	if err := json.Unmarshal(rec2.Body.Bytes(), &page2); err != nil {
+		t.Fatalf("page 2 unmarshal: %v", err)
+	}
+	if len(page2.Flags) != 2 || page2.Flags[0].Key != "flag-0002" || page2.Flags[1].Key != "flag-0003" {
+		t.Fatalf("page 2 unexpected: %v", page2.Flags)
+	}
+	if page2.NextCursor == "" {
+		t.Fatal("page 2 next_cursor should be set")
+	}
+
+	// Page 3: final page, 1 remaining flag
+	req3 := reqWithProject(httptest.NewRequest(http.MethodGet, "/v1/flags?cursor="+page2.NextCursor+"&limit=2", nil))
+	rec3 := httptest.NewRecorder()
+	handler.ServeHTTP(rec3, req3)
+
+	var page3 paginatedFlagsResponse
+	if err := json.Unmarshal(rec3.Body.Bytes(), &page3); err != nil {
+		t.Fatalf("page 3 unmarshal: %v", err)
+	}
+	if len(page3.Flags) != 1 || page3.Flags[0].Key != "flag-0004" {
+		t.Fatalf("page 3 unexpected: %v", page3.Flags)
+	}
+	if page3.NextCursor != "" {
+		t.Fatalf("page 3 next_cursor = %q, want empty", page3.NextCursor)
+	}
+}
+
 func TestHTTPHandlerStreamWithKeyFilter(t *testing.T) {
 	var calledKey string
 	svc := &fakeService{

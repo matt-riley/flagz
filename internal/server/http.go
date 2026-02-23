@@ -227,7 +227,7 @@ func (s *HTTPServer) handleListFlags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cursor := r.URL.Query().Get("cursor")
+	cursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
 	limit := 0
 	if l := r.URL.Query().Get("limit"); l != "" {
 		limit, err = strconv.Atoi(l)
@@ -241,6 +241,7 @@ func (s *HTTPServer) handleListFlags(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Apply cursor-based pagination when either parameter is provided.
+	// Sorting is acceptable here because flags come from the in-memory cache.
 	if cursor != "" || limit > 0 {
 		sort.Slice(flags, func(i, j int) bool { return flags[i].Key < flags[j].Key })
 
@@ -254,6 +255,9 @@ func (s *HTTPServer) handleListFlags(w http.ResponseWriter, r *http.Request) {
 		}
 		nextCursor := ""
 		if len(flags) > limit {
+			// Cursor is the last key of the current page; the next request
+			// uses "> cursor" to resume from the following item.
+			// Flag keys are unique per project so this is safe.
 			nextCursor = flags[limit-1].Key
 			flags = flags[:limit]
 		}
