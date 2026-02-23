@@ -70,19 +70,7 @@ func (rl *RateLimiter) RecordFailure(ip string) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	e, ok := rl.entries[ip]
-	if !ok {
-		if len(rl.entries) >= rl.maxTrackedIPs {
-			rl.evictOldestLocked()
-		}
-		r := rate.Limit(float64(rl.maxPerMinute) / 60.0)
-		e = &ipEntry{
-			limiter:  rate.NewLimiter(r, rl.maxPerMinute),
-			lastSeen: time.Now(),
-		}
-		rl.entries[ip] = e
-	}
-	e.lastSeen = time.Now()
+	e := rl.getOrCreateEntryLocked(ip, time.Now())
 	e.limiter.Allow() // consume a token
 }
 
@@ -92,6 +80,11 @@ func (rl *RateLimiter) RecordFailureAndAllow(ip string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
+	e := rl.getOrCreateEntryLocked(ip, time.Now())
+	return e.limiter.Allow()
+}
+
+func (rl *RateLimiter) getOrCreateEntryLocked(ip string, now time.Time) *ipEntry {
 	e, ok := rl.entries[ip]
 	if !ok {
 		if len(rl.entries) >= rl.maxTrackedIPs {
@@ -100,12 +93,12 @@ func (rl *RateLimiter) RecordFailureAndAllow(ip string) bool {
 		r := rate.Limit(float64(rl.maxPerMinute) / 60.0)
 		e = &ipEntry{
 			limiter:  rate.NewLimiter(r, rl.maxPerMinute),
-			lastSeen: time.Now(),
+			lastSeen: now,
 		}
 		rl.entries[ip] = e
 	}
-	e.lastSeen = time.Now()
-	return e.limiter.Allow()
+	e.lastSeen = now
+	return e
 }
 
 // Stop cancels the background cleanup goroutine.
