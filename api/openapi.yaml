@@ -218,10 +218,10 @@ paths:
             Maximum number of flags to return when pagination is enabled.
             If neither cursor nor limit is provided, all flags are returned (no pagination).
             When pagination is enabled without an explicit limit, a default page size of 100 is used.
+            Values above 1000 are accepted and clamped down to 1000.
           schema:
             type: integer
             minimum: 1
-            maximum: 1000
       responses:
         '200':
           description: >
