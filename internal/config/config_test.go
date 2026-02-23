@@ -22,6 +22,9 @@ func TestLoad_Defaults(t *testing.T) {
 	t.Setenv("GRPC_ADDR", "")
 	t.Setenv("TS_AUTH_KEY", "")
 	t.Setenv("TS_STATE_DIR", "")
+	t.Setenv("MAX_JSON_BODY_SIZE", "")
+	t.Setenv("EVENT_BATCH_SIZE", "")
+	t.Setenv("CACHE_RESYNC_INTERVAL", "")
 
 	cfg, err := Load()
 	if err != nil {
