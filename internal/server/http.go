@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +34,7 @@ type HTTPServer struct {
 	metrics            *metrics.Metrics
 	metricsHandler     http.Handler
 	streamPollInterval time.Duration
+	maxJSONBodyBytes   int64
 }
 
 type evaluateJSONRequest struct {
@@ -52,10 +54,28 @@ type evaluateJSONResponse struct {
 	Results []service.ResolveResult `json:"results"`
 }
 
+type paginatedFlagsResponse struct {
+	Flags      []repository.Flag `json:"flags"`
+	NextCursor string            `json:"next_cursor,omitempty"`
+}
+
 // NewHTTPHandler returns an [http.Handler] wired with all flagz routes and a
 // default stream poll interval of 1 second.
 func NewHTTPHandler(svc Service) http.Handler {
 	return NewHTTPHandlerWithOptions(svc, defaultStreamPollInterval, nil)
+}
+
+// HTTPOption configures optional HTTPServer parameters.
+type HTTPOption func(*HTTPServer)
+
+// WithMaxJSONBodySize sets the maximum allowed JSON request body size in bytes.
+// Defaults to 1MB if not set or if size <= 0.
+func WithMaxJSONBodySize(size int64) HTTPOption {
+	return func(s *HTTPServer) {
+		if size > 0 {
+			s.maxJSONBodyBytes = size
+		}
+	}
 }
 
 // NewHTTPHandlerWithStreamPollInterval returns an [http.Handler] wired with all
@@ -63,14 +83,14 @@ func NewHTTPHandler(svc Service) http.Handler {
 //
 // Note: This constructor creates a private [metrics.Metrics] instance. To share
 // a single registry across HTTP and gRPC servers, use [NewHTTPHandlerWithOptions].
-func NewHTTPHandlerWithStreamPollInterval(svc Service, streamPollInterval time.Duration) http.Handler {
-	return NewHTTPHandlerWithOptions(svc, streamPollInterval, nil)
+func NewHTTPHandlerWithStreamPollInterval(svc Service, streamPollInterval time.Duration, opts ...HTTPOption) http.Handler {
+	return NewHTTPHandlerWithOptions(svc, streamPollInterval, nil, opts...)
 }
 
 // NewHTTPHandlerWithOptions returns an [http.Handler] wired with all flagz
 // routes using the specified stream poll interval and metrics. If m is nil, a
 // default [metrics.Metrics] instance is created.
-func NewHTTPHandlerWithOptions(svc Service, streamPollInterval time.Duration, m *metrics.Metrics) http.Handler {
+func NewHTTPHandlerWithOptions(svc Service, streamPollInterval time.Duration, m *metrics.Metrics, opts ...HTTPOption) http.Handler {
 	if svc == nil {
 		panic("service is nil")
 	}
@@ -88,6 +108,11 @@ func NewHTTPHandlerWithOptions(svc Service, streamPollInterval time.Duration, m 
 		metrics:            m,
 		metricsHandler:     m.Handler(),
 		streamPollInterval: streamPollInterval,
+		maxJSONBodyBytes:   maxJSONBodyBytes,
+	}
+
+	for _, opt := range opts {
+		opt(server)
 	}
 
 	mux := http.NewServeMux()
@@ -165,7 +190,7 @@ func (s *HTTPServer) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var flag repository.Flag
-	if err := decodeJSONBody(w, r, &flag); err != nil {
+	if err := s.decodeJSONBody(w, r, &flag); err != nil {
 		writeJSONDecodeError(w, err)
 		return
 	}
@@ -174,7 +199,7 @@ func (s *HTTPServer) handleCreateFlag(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "key is required")
 		return
 	}
-	
+
 	// Force project ID from context
 	flag.ProjectID = projectID
 
@@ -216,9 +241,59 @@ func (s *HTTPServer) handleListFlags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	query := r.URL.Query()
+	cursor := strings.TrimSpace(query.Get("cursor"))
+	_, cursorProvided := query["cursor"]
+
+	limit := 0
+	_, limitProvided := query["limit"]
+	if limitProvided {
+		l := strings.TrimSpace(query.Get("limit"))
+		if l == "" {
+			writeJSONError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		parsedLimit, err := strconv.Atoi(l)
+		if err != nil || parsedLimit < 1 {
+			writeJSONError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		limit = parsedLimit
+		if limit > 1000 {
+			limit = 1000
+		}
+	}
+
 	flags, err := s.service.ListFlags(r.Context(), projectID)
 	if err != nil {
 		writeServiceError(w, err)
+		return
+	}
+
+	// Apply cursor-based pagination when either parameter is provided.
+	if cursorProvided || limitProvided {
+		// Service.ListFlags returns flags sorted by key.
+		if cursor != "" {
+			idx := sort.Search(len(flags), func(i int) bool { return flags[i].Key > cursor })
+			flags = flags[idx:]
+		}
+
+		if limit == 0 {
+			limit = 100
+		}
+		nextCursor := ""
+		if len(flags) > limit {
+			// Cursor is the last key of the current page; the next request
+			// uses "> cursor" to resume from the following item.
+			// Flag keys are unique per project so this is safe.
+			nextCursor = flags[limit-1].Key
+			flags = flags[:limit]
+		}
+
+		writeJSON(w, http.StatusOK, paginatedFlagsResponse{
+			Flags:      flags,
+			NextCursor: nextCursor,
+		})
 		return
 	}
 
@@ -239,7 +314,7 @@ func (s *HTTPServer) handleUpdateFlag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var flag repository.Flag
-	if err := decodeJSONBody(w, r, &flag); err != nil {
+	if err := s.decodeJSONBody(w, r, &flag); err != nil {
 		writeJSONDecodeError(w, err)
 		return
 	}
@@ -289,7 +364,7 @@ func (s *HTTPServer) handleEvaluate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request evaluateJSONRequest
-	if err := decodeJSONBody(w, r, &request); err != nil {
+	if err := s.decodeJSONBody(w, r, &request); err != nil {
 		writeJSONDecodeError(w, err)
 		return
 	}
@@ -350,7 +425,18 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	filterKey := strings.TrimSpace(r.URL.Query().Get("key"))
+
 	rc := http.NewResponseController(w)
+
+	// listEvents selects the appropriate service method based on whether
+	// a per-key filter was requested.
+	listEvents := func(ctx context.Context, eventID int64) ([]repository.FlagEvent, error) {
+		if filterKey != "" {
+			return s.service.ListEventsSinceForKey(ctx, projectID, eventID, filterKey)
+		}
+		return s.service.ListEventsSince(ctx, projectID, eventID)
+	}
 
 	currentEventID := lastEventID
 	writeEvents := func(events []repository.FlagEvent) error {
@@ -375,7 +461,7 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 		return nil
 	}
 
-	initialEvents, err := s.service.ListEventsSince(r.Context(), projectID, currentEventID)
+	initialEvents, err := listEvents(r.Context(), currentEventID)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -403,7 +489,7 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
-			events, err := s.service.ListEventsSince(r.Context(), projectID, currentEventID)
+			events, err := listEvents(r.Context(), currentEventID)
 			if err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return
@@ -578,12 +664,12 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
+func (s *HTTPServer) decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
 	if r.Body == nil {
 		return io.EOF
 	}
 
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONBodyBytes))
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, s.maxJSONBodyBytes))
 	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(dst); err != nil {

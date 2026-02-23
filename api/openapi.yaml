@@ -184,6 +184,19 @@ components:
           description: A description of what went wrong.
       example:
         error: key is required
+    PaginatedFlagsResponse:
+      type: object
+      description: Paginated response returned when cursor or limit query params are provided.
+      properties:
+        flags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Flag'
+        next_cursor:
+          type: string
+          description: Cursor for the next page, if any. Omitted when there are no more results.
+      required:
+        - flags
 
     AuditLogEntry:
       type: object
@@ -233,15 +246,41 @@ paths:
     get:
       summary: List all flags
       description: Retrieve all flags from the in-memory cache. Fast as lightning.
+      parameters:
+        - name: cursor
+          in: query
+          description: Flag key to start after (for pagination)
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: >
+            Maximum number of flags to return when pagination is enabled.
+            If neither cursor nor limit is provided, all flags are returned (no pagination).
+            When pagination is enabled without an explicit limit, a default page size of 100 is used.
+            Values above 1000 are accepted and clamped down to 1000.
+          schema:
+            type: integer
+            minimum: 1
       responses:
         '200':
-          description: A list of all known flags.
+          description: >
+            Without pagination params: a bare JSON array of flags.
+            With cursor or limit: a wrapped object with flags and next_cursor.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Flag'
+                oneOf:
+                  - type: array
+                    items:
+                      $ref: '#/components/schemas/Flag'
+                  - $ref: '#/components/schemas/PaginatedFlagsResponse'
+        '400':
+          description: Bad Request. Invalid query parameter value.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized. Did you forget your token?
           content:
@@ -435,6 +474,11 @@ paths:
         Subscribe to real-time flag changes via Server-Sent Events (SSE).
         Events include `update` and `delete`.
       parameters:
+        - name: key
+          in: query
+          description: Optional flag key to filter events
+          schema:
+            type: string
         - name: Last-Event-ID
           in: header
           schema:
