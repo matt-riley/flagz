@@ -1,11 +1,11 @@
-package metrics_test
+package metrics
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/matt-riley/flagz/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
@@ -14,7 +14,7 @@ import (
 
 func TestRegisterPoolMetrics(t *testing.T) {
 	// A zero-config pool (never connected) still exposes valid Stat() values.
-	pool, err := pgxpool.New(t.Context(), "")
+	pool, err := pgxpool.New(context.Background(), "")
 	if err != nil {
 		// On systems without a running Postgres the pool constructor may still
 		// succeed (connection is lazy), but if it fails we skip rather than
@@ -24,7 +24,7 @@ func TestRegisterPoolMetrics(t *testing.T) {
 	defer pool.Close()
 
 	reg := prometheus.NewPedanticRegistry()
-	metrics.RegisterPoolMetrics(reg, pool)
+	RegisterPoolMetrics(reg, pool)
 
 	maxConns := pool.Stat().MaxConns()
 
@@ -54,14 +54,14 @@ flagz_db_pool_total 0
 }
 
 func TestRegisterPoolMetrics_DescribeCollect(t *testing.T) {
-	pool, err := pgxpool.New(t.Context(), "")
+	pool, err := pgxpool.New(context.Background(), "")
 	if err != nil {
 		t.Skipf("unable to create pgxpool (no database): %v", err)
 	}
 	defer pool.Close()
 
 	reg := prometheus.NewPedanticRegistry()
-	metrics.RegisterPoolMetrics(reg, pool)
+	RegisterPoolMetrics(reg, pool)
 
 	// Gathering twice should not panic or return errors.
 	mfs, err := reg.Gather()
