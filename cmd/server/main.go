@@ -32,6 +32,9 @@ import (
 	"github.com/matt-riley/flagz/internal/repository"
 	"github.com/matt-riley/flagz/internal/server"
 	"github.com/matt-riley/flagz/internal/service"
+	"github.com/matt-riley/flagz/internal/tracing"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"google.golang.org/grpc"
 	"tailscale.com/tsnet"
 )
@@ -60,6 +63,18 @@ func run() error {
 	log := logging.New(cfg.LogLevel)
 	slog.SetDefault(log)
 
+	shutdownTracer, err := tracing.Init(context.Background())
+	if err != nil {
+		return fmt.Errorf("init tracing: %w", err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracer(ctx); err != nil {
+			log.Error("tracer shutdown error", "err", err)
+		}
+	}()
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -69,11 +84,12 @@ func run() error {
 	}
 	defer pool.Close()
 
-	repo := repository.NewPostgresRepository(pool)
+	repo := repository.NewPostgresRepository(pool, repository.WithEventBatchSize(cfg.EventBatchSize))
 	m := metrics.New()
 	svc, err := service.New(ctx, repo,
 		service.WithLogger(log),
 		service.WithCacheMetrics(m.IncCacheLoads, m.IncCacheInvalidations, m.ResetCacheSize, m.SetCacheSize),
+		service.WithCacheResyncInterval(cfg.CacheResyncInterval),
 	)
 	if err != nil {
 		return fmt.Errorf("init service: %w", err)
@@ -84,18 +100,19 @@ func run() error {
 	rateLimiter := middleware.NewRateLimiter(ctx, cfg.AuthRateLimit)
 	defer rateLimiter.Stop()
 	authRL := middleware.WithRateLimiter(rateLimiter)
-	apiHandler := server.NewHTTPHandlerWithOptions(svc, cfg.StreamPollInterval, m)
+	apiHandler := server.NewHTTPHandlerWithOptions(svc, cfg.StreamPollInterval, m, server.WithMaxJSONBodySize(cfg.MaxJSONBodySize))
 	httpHandler := newHTTPHandler(apiHandler, tokenValidator, authFailure, authRL)
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpHandler,
+		Handler:           otelhttp.NewHandler(httpHandler, "flagz-http"),
 		ReadHeaderTimeout: httpReadHeaderTimeout,
 		ReadTimeout:       httpReadTimeout,
 		IdleTimeout:       httpIdleTimeout,
 	}
 
 	grpcServer := grpc.NewServer(
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.ChainUnaryInterceptor(
 			middleware.UnaryBearerAuthInterceptor(tokenValidator, authFailure, authRL),
 			m.UnaryServerInterceptor(),
