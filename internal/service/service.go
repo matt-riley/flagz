@@ -27,10 +27,10 @@ const (
 	// EventTypeUpdated is the event type emitted when a flag is created or updated.
 	EventTypeUpdated = "updated"
 	// EventTypeDeleted is the event type emitted when a flag is deleted.
-	EventTypeDeleted    = "deleted"
-	bestEffortTimeout   = 2 * time.Second
-	cacheResyncInterval = time.Minute
-	cacheReloadTimeout  = 5 * time.Second
+	EventTypeDeleted           = "deleted"
+	bestEffortTimeout          = 2 * time.Second
+	defaultCacheResyncInterval = time.Minute
+	cacheReloadTimeout         = 5 * time.Second
 )
 
 var (
@@ -142,7 +142,7 @@ func New(ctx context.Context, repo Repository, opts ...Option) (*Service, error)
 		repo:                repo,
 		log:                 slog.Default(),
 		cache:               make(map[string]map[string]repository.Flag),
-		cacheResyncInterval: cacheResyncInterval,
+		cacheResyncInterval: defaultCacheResyncInterval,
 	}
 	for _, opt := range opts {
 		opt(svc)

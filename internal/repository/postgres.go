@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	defaultNotifyChannel = "flag_events"
-	maxEventBatchSize    = 1000
+	defaultNotifyChannel  = "flag_events"
+	defaultEventBatchSize = 1000
 )
 
 // Flag is the repository-level representation of a feature flag row.
@@ -117,7 +117,7 @@ func NewPostgresRepositoryWithChannel(pool *pgxpool.Pool, notifyChannel string, 
 	r := &PostgresRepository{
 		pool:           pool,
 		notifyChannel:  normalizeNotifyChannel(notifyChannel),
-		eventBatchSize: maxEventBatchSize,
+		eventBatchSize: defaultEventBatchSize,
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -288,8 +288,8 @@ func (r *PostgresRepository) ValidateAPIKey(ctx context.Context, id string) (str
 	return keyHash, projectID, nil
 }
 
-// ListEventsSince returns up to 1000 flag events with IDs greater than
-// eventID, ordered by event ID.
+// ListEventsSince returns up to the configured event batch size (default 1000)
+// flag events with IDs greater than eventID, ordered by event ID.
 func (r *PostgresRepository) ListEventsSince(ctx context.Context, projectID string, eventID int64) ([]FlagEvent, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT event_id, project_id, flag_key, event_type, payload, created_at
@@ -327,9 +327,10 @@ func (r *PostgresRepository) ListEventsSince(ctx context.Context, projectID stri
 	return events, nil
 }
 
-// ListEventsSinceForKey returns up to maxEventBatchSize flag events with IDs greater than
-// eventID for the specified project and flag key. Including projectID in the filter ensures
-// that events are correctly scoped when different projects reuse the same flag keys.
+// ListEventsSinceForKey returns up to the configured event batch size (default
+// 1000) flag events with IDs greater than eventID for the specified project and
+// flag key. Including projectID in the filter ensures that events are correctly
+// scoped when different projects reuse the same flag keys.
 func (r *PostgresRepository) ListEventsSinceForKey(ctx context.Context, projectID string, eventID int64, key string) ([]FlagEvent, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT event_id, project_id, flag_key, event_type, payload, created_at
