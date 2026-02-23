@@ -58,11 +58,10 @@ cfg.onFailure()
 }
 if cfg.rateLimiter != nil {
 ip := ExtractIP(r.RemoteAddr)
-if !cfg.rateLimiter.Allow(ip) {
+if !cfg.rateLimiter.RecordFailureAndAllow(ip) {
 http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
 return
 }
-cfg.rateLimiter.RecordFailure(ip)
 }
 writeHTTPUnauthorized(w)
 return
@@ -90,10 +89,9 @@ cfg.onFailure()
 }
 if cfg.rateLimiter != nil {
 if ip := extractGRPCPeerIP(ctx); ip != "" {
-if !cfg.rateLimiter.Allow(ip) {
+if !cfg.rateLimiter.RecordFailureAndAllow(ip) {
 return nil, status.Error(codes.ResourceExhausted, "too many failed auth attempts")
 }
-cfg.rateLimiter.RecordFailure(ip)
 }
 }
 return nil, status.Error(codes.Unauthenticated, "unauthorized")
@@ -121,10 +119,9 @@ cfg.onFailure()
 }
 if cfg.rateLimiter != nil {
 if ip := extractGRPCPeerIP(ctx); ip != "" {
-if !cfg.rateLimiter.Allow(ip) {
+if !cfg.rateLimiter.RecordFailureAndAllow(ip) {
 return status.Error(codes.ResourceExhausted, "too many failed auth attempts")
 }
-cfg.rateLimiter.RecordFailure(ip)
 }
 }
 return status.Error(codes.Unauthenticated, "unauthorized")

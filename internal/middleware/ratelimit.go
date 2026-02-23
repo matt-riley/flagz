@@ -86,6 +86,28 @@ func (rl *RateLimiter) RecordFailure(ip string) {
 	e.limiter.Allow() // consume a token
 }
 
+// RecordFailureAndAllow records a failed attempt for ip and returns whether the
+// attempt is still within the configured rate limit.
+func (rl *RateLimiter) RecordFailureAndAllow(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	e, ok := rl.entries[ip]
+	if !ok {
+		if len(rl.entries) >= rl.maxTrackedIPs {
+			rl.evictOldestLocked()
+		}
+		r := rate.Limit(float64(rl.maxPerMinute) / 60.0)
+		e = &ipEntry{
+			limiter:  rate.NewLimiter(r, rl.maxPerMinute),
+			lastSeen: time.Now(),
+		}
+		rl.entries[ip] = e
+	}
+	e.lastSeen = time.Now()
+	return e.limiter.Allow()
+}
+
 // Stop cancels the background cleanup goroutine.
 func (rl *RateLimiter) Stop() {
 	rl.cancel()
