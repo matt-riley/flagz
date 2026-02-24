@@ -134,12 +134,24 @@ func (h *Handler) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-		if user.Role != "admin" {
+		if !isAdminRole(user.Role) {
 			http.Error(w, "Forbidden: admin role required", http.StatusForbidden)
 			return
 		}
 		next(w, r)
 	}
+}
+
+func isAdminRole(role string) bool {
+	return role == "admin"
+}
+
+func canManageAPIKeys(method, role string) bool {
+	if method == http.MethodPost {
+		return isAdminRole(role)
+	}
+
+	return true
 }
 
 func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
@@ -560,6 +572,11 @@ func (h *Handler) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !canManageAPIKeys(r.Method, user.Role) {
+		http.Error(w, "Forbidden: admin role required", http.StatusForbidden)
+		return
+	}
+
 	if r.Method == "POST" {
 		keyID, rawSecret, createErr := h.Repo.CreateAPIKeyForProject(r.Context(), projectID)
 		if createErr != nil {
@@ -569,7 +586,7 @@ func (h *Handler) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 
 		keys, listErr := h.Repo.ListAPIKeysForProject(r.Context(), projectID)
 		if listErr != nil {
-			slog.Error("failed to list API keys", "project_id", projectID, "err", listErr)
+			h.log.Error("failed to list API keys", "project_id", projectID, "error", listErr)
 		}
 		if renderErr := Render(w, "api_keys.html", map[string]any{
 			"User":      user,
@@ -579,7 +596,7 @@ func (h *Handler) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 			"NewSecret": rawSecret,
 			"CSRFToken": session.CSRFToken,
 		}); renderErr != nil {
-			slog.Error("render error", "err", renderErr)
+			h.log.Error("render error", "error", renderErr)
 		}
 		return
 	}
@@ -596,7 +613,7 @@ func (h *Handler) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 		"APIKeys":   keys,
 		"CSRFToken": session.CSRFToken,
 	}); renderErr != nil {
-		slog.Error("render error", "err", renderErr)
+		h.log.Error("render error", "error", renderErr)
 	}
 }
 
@@ -663,7 +680,7 @@ func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 		"Entries":   entries,
 		"CSRFToken": session.CSRFToken,
 	}); renderErr != nil {
-		slog.Error("render error", "err", renderErr)
+		h.log.Error("render error", "error", renderErr)
 	}
 }
 

@@ -112,3 +112,45 @@ func TestRenderAuditLogTemplate_Empty(t *testing.T) {
 		t.Error("expected empty state message")
 	}
 }
+
+func TestIsAdminRole(t *testing.T) {
+	tests := []struct {
+		name string
+		role string
+		want bool
+	}{
+		{name: "admin role", role: "admin", want: true},
+		{name: "viewer role", role: "viewer", want: false},
+		{name: "empty role", role: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isAdminRole(tt.role); got != tt.want {
+				t.Fatalf("isAdminRole(%q) = %v, want %v", tt.role, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCanManageAPIKeys(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		role   string
+		want   bool
+	}{
+		{name: "viewer can read", method: "GET", role: "viewer", want: true},
+		{name: "viewer cannot create", method: "POST", role: "viewer", want: false},
+		{name: "admin can create", method: "POST", role: "admin", want: true},
+		{name: "admin can read", method: "GET", role: "admin", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := canManageAPIKeys(tt.method, tt.role); got != tt.want {
+				t.Fatalf("canManageAPIKeys(%q,%q) = %v, want %v", tt.method, tt.role, got, tt.want)
+			}
+		})
+	}
+}
