@@ -5,16 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"time"
 
 	"github.com/matt-riley/flagz/internal/middleware"
 )
-
-// APIKeyMeta contains non-secret metadata about an API key.
-type APIKeyMeta struct {
-	ID        string    `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-}
 
 // CreateAPIKeyForProject generates a new API key for the given project and
 // returns the key ID and raw secret. The secret is bcrypt-hashed before
@@ -52,7 +45,7 @@ VALUES ($1, $2, $3, $4)
 // to the specified project.
 func (r *PostgresRepository) ListAPIKeysForProject(ctx context.Context, projectID string) ([]APIKeyMeta, error) {
 	rows, err := r.pool.Query(ctx, `
-SELECT id, created_at
+SELECT id, project_id, created_at
 FROM api_keys
 WHERE project_id = $1 AND revoked_at IS NULL
 ORDER BY created_at DESC
@@ -65,7 +58,7 @@ ORDER BY created_at DESC
 	keys := make([]APIKeyMeta, 0)
 	for rows.Next() {
 		var k APIKeyMeta
-		if err := rows.Scan(&k.ID, &k.CreatedAt); err != nil {
+		if err := rows.Scan(&k.ID, &k.ProjectID, &k.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan api key: %w", err)
 		}
 		keys = append(keys, k)

@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -26,13 +27,20 @@ type TokenValidator interface {
 type AuthOption func(*authConfig)
 
 type authConfig struct {
-	onFailure func()
+	onFailure   func()
+	rateLimiter *RateLimiter
 }
 
 // WithOnAuthFailure registers a callback invoked on every authentication
 // failure (e.g. to increment a Prometheus counter).
 func WithOnAuthFailure(fn func()) AuthOption {
 	return func(c *authConfig) { c.onFailure = fn }
+}
+
+// WithRateLimiter attaches a per-IP rate limiter that throttles repeated
+// authentication failures.
+func WithRateLimiter(rl *RateLimiter) AuthOption {
+	return func(c *authConfig) { c.rateLimiter = rl }
 }
 
 // HTTPBearerAuthMiddleware enforces bearer-token auth for HTTP handlers.
@@ -47,6 +55,14 @@ func HTTPBearerAuthMiddleware(validator TokenValidator, opts ...AuthOption) func
 			if err != nil {
 				if cfg.onFailure != nil {
 					cfg.onFailure()
+				}
+				if cfg.rateLimiter != nil {
+					if ip := ExtractIP(r.RemoteAddr); ip != "" {
+						if !cfg.rateLimiter.RecordFailureAndAllow(ip) {
+							http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
+							return
+						}
+					}
 				}
 				writeHTTPUnauthorized(w)
 				return
@@ -72,6 +88,13 @@ func UnaryBearerAuthInterceptor(validator TokenValidator, opts ...AuthOption) gr
 			if cfg.onFailure != nil {
 				cfg.onFailure()
 			}
+			if cfg.rateLimiter != nil {
+				if ip := extractGRPCPeerIP(ctx); ip != "" {
+					if !cfg.rateLimiter.RecordFailureAndAllow(ip) {
+						return nil, status.Error(codes.ResourceExhausted, "too many failed auth attempts")
+					}
+				}
+			}
 			return nil, status.Error(codes.Unauthenticated, "unauthorized")
 		}
 		newCtx := context.WithValue(ctx, projectIDKey, projectID)
@@ -89,15 +112,23 @@ func StreamBearerAuthInterceptor(validator TokenValidator, opts ...AuthOption) g
 		o(&cfg)
 	}
 	return func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		projectID, err := authorizeGRPC(ss.Context(), validator)
+		ctx := ss.Context()
+		projectID, err := authorizeGRPC(ctx, validator)
 		if err != nil {
 			if cfg.onFailure != nil {
 				cfg.onFailure()
 			}
+			if cfg.rateLimiter != nil {
+				if ip := extractGRPCPeerIP(ctx); ip != "" {
+					if !cfg.rateLimiter.RecordFailureAndAllow(ip) {
+						return status.Error(codes.ResourceExhausted, "too many failed auth attempts")
+					}
+				}
+			}
 			return status.Error(codes.Unauthenticated, "unauthorized")
 		}
 
-		ctx := context.WithValue(ss.Context(), projectIDKey, projectID)
+		ctx = context.WithValue(ctx, projectIDKey, projectID)
 		if keyID := apiKeyIDFromGRPCMetadata(ss.Context()); keyID != "" {
 			ctx = context.WithValue(ctx, apiKeyIDKey, keyID)
 		}
@@ -124,8 +155,9 @@ func (w *wrappedServerStream) Context() context.Context {
 type contextKey string
 
 const (
-	projectIDKey contextKey = "project_id"
-	apiKeyIDKey  contextKey = "api_key_id"
+	projectIDKey   contextKey = "project_id"
+	apiKeyIDKey    contextKey = "api_key_id"
+	adminUserIDKey contextKey = "admin_user_id"
 )
 
 // ProjectIDFromContext retrieves the project ID from the context.
@@ -148,6 +180,17 @@ func APIKeyIDFromContext(ctx context.Context) (string, bool) {
 // NewContextWithAPIKeyID returns a new context with the given API key ID.
 func NewContextWithAPIKeyID(ctx context.Context, keyID string) context.Context {
 	return context.WithValue(ctx, apiKeyIDKey, keyID)
+}
+
+// AdminUserIDFromContext retrieves the admin user ID from the context.
+func AdminUserIDFromContext(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(adminUserIDKey).(string)
+	return id, ok
+}
+
+// NewContextWithAdminUserID returns a new context with the given admin user ID.
+func NewContextWithAdminUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, adminUserIDKey, userID)
 }
 
 func authorizeHTTP(ctx context.Context, authorizationHeader string, validator TokenValidator) (string, error) {
@@ -250,4 +293,12 @@ func apiKeyIDFromGRPCMetadata(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+func extractGRPCPeerIP(ctx context.Context) string {
+	p, ok := peer.FromContext(ctx)
+	if !ok || p.Addr == nil {
+		return ""
+	}
+	return ExtractIP(p.Addr.String())
 }
