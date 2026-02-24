@@ -1241,6 +1241,20 @@ func TestDeleteAPIKey_ProjectIDValidation(t *testing.T) {
 	}
 }
 
+func TestDeleteAPIKey_KeyIDValidation(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeAPIKeyRepository()
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	err = svc.DeleteAPIKey(ctx, "proj-1", "")
+	if !errors.Is(err, ErrAPIKeyIDRequired) {
+		t.Fatalf("DeleteAPIKey(..., '') error = %v, want %v", err, ErrAPIKeyIDRequired)
+	}
+}
+
 func TestDeleteAPIKey_NotFound(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeAPIKeyRepository()
