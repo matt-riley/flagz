@@ -60,7 +60,6 @@ type AdminUser struct {
 	ID           string    `json:"id"`
 	Username     string    `json:"username"`
 	PasswordHash string    `json:"-"`
-	Role         string    `json:"role"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -585,11 +584,10 @@ func (r *PostgresRepository) CreateAdminUser(ctx context.Context, username, pass
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO admin_users (username, password_hash)
 		VALUES ($1, $2)
-		RETURNING id, username, role, created_at, updated_at
+		RETURNING id, username, created_at, updated_at
 	`, username, passwordHash).Scan(
 		&u.ID,
 		&u.Username,
-		&u.Role,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 	)
@@ -603,14 +601,13 @@ func (r *PostgresRepository) CreateAdminUser(ctx context.Context, username, pass
 func (r *PostgresRepository) GetAdminUserByUsername(ctx context.Context, username string) (AdminUser, error) {
 	var u AdminUser
 	err := r.pool.QueryRow(ctx, `
-		SELECT id, username, password_hash, role, created_at, updated_at
+		SELECT id, username, password_hash, created_at, updated_at
 		FROM admin_users
 		WHERE username = $1
 	`, username).Scan(
 		&u.ID,
 		&u.Username,
 		&u.PasswordHash,
-		&u.Role,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 	)
