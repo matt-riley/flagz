@@ -25,7 +25,7 @@ jobs:
           set -euo pipefail
 
           repo="${GITHUB_REPOSITORY}"
-          stale_prs="$(gh pr list --state merged --search 'head:release-please--branches--main label:"autorelease: pending"' --json number,mergeCommit,mergedAt,title,url --limit 20)"
+          stale_prs="$(gh pr list --repo "${repo}" --state merged --search 'head:release-please--branches--main label:"autorelease: pending"' --json number,mergeCommit,mergedAt,title,url --limit 20)"
           stale_count="$(echo "${stale_prs}" | jq 'length')"
           echo "Found ${stale_count} stale merged release PR(s)."
 
@@ -38,12 +38,13 @@ jobs:
             local target_sha="$2"
             local pr_number="$3"
 
-            if gh release view "${tag}" >/dev/null 2>&1; then
+            if gh release view "${tag}" --repo "${repo}" >/dev/null 2>&1; then
               echo "Release ${tag} already exists."
               return
             fi
 
             gh release create "${tag}" \
+              --repo "${repo}" \
               --target "${target_sha}" \
               --title "${tag}" \
               --notes "Backfilled missing release for merged release PR #${pr_number} via Release Please Guard."
@@ -112,13 +113,13 @@ jobs:
               done
             fi
 
-            gh pr edit "${pr_number}" --remove-label "autorelease: pending" || true
+            gh pr edit "${pr_number}" --repo "${repo}" --remove-label "autorelease: pending" || true
             echo "Removed autorelease: pending from PR #${pr_number}."
             repaired_any=1
           done < <(echo "${stale_prs}" | jq -r '.[] | "\(.number)\t\(.mergeCommit.oid // "null")\t\(.mergedAt // "")"')
 
           if [ "${repaired_any}" -eq 1 ]; then
-            gh workflow run release-please.yml --ref main
+            gh workflow run release-please.yml --repo "${repo}" --ref main
             echo "Triggered release-please.yml after stale-state repair."
           else
             echo "No eligible stale release PR required repair."
