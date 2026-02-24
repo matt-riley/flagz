@@ -2,6 +2,9 @@ package admin
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -152,5 +155,51 @@ func TestCanManageAPIKeys(t *testing.T) {
 				t.Fatalf("canManageAPIKeys(%q,%q) = %v, want %v", tt.method, tt.role, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRequireAdmin_MissingSessionRedirects(t *testing.T) {
+	h := &Handler{}
+	nextCalled := false
+	handler := h.requireAdmin(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if nextCalled {
+		t.Fatal("expected next handler not to be called")
+	}
+	if rr.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusFound)
+	}
+}
+
+func TestHandleDeleteAPIKey_MissingProjectID(t *testing.T) {
+	h := &Handler{}
+	form := url.Values{"key_id": {"key-1"}}
+	req := httptest.NewRequest(http.MethodPost, "/api-keys/delete/", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+
+	h.handleDeleteAPIKey(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandleDeleteAPIKey_MissingKeyID(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequest(http.MethodPost, "/api-keys/delete/proj-1", nil)
+	rr := httptest.NewRecorder()
+
+	h.handleDeleteAPIKey(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
 	}
 }
