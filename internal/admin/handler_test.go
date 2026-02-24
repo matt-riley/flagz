@@ -181,6 +181,28 @@ func TestCanManageAPIKeys(t *testing.T) {
 	}
 }
 
+func TestCanMutateFlags(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		role   string
+		want   bool
+	}{
+		{name: "viewer can read", method: http.MethodGet, role: "viewer", want: true},
+		{name: "viewer cannot create", method: http.MethodPost, role: "viewer", want: false},
+		{name: "viewer cannot delete", method: http.MethodDelete, role: "viewer", want: false},
+		{name: "admin can mutate", method: http.MethodPost, role: "admin", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := canMutateFlags(tt.method, tt.role); got != tt.want {
+				t.Fatalf("canMutateFlags(%q,%q) = %v, want %v", tt.method, tt.role, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRequireAdmin_MissingSessionRedirects(t *testing.T) {
 	h := &Handler{}
 	nextCalled := false
@@ -224,5 +246,29 @@ func TestHandleDeleteAPIKey_MissingKeyID(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleAPIKeys_MethodNotAllowed(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequest(http.MethodPut, "/api-keys/proj-1", nil)
+	rr := httptest.NewRecorder()
+
+	h.handleAPIKeys(rr, req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestHandleAuditLog_MethodNotAllowed(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequest(http.MethodPost, "/audit-log/proj-1", nil)
+	rr := httptest.NewRecorder()
+
+	h.handleAuditLog(rr, req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusMethodNotAllowed)
 	}
 }

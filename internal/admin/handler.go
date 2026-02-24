@@ -154,6 +154,14 @@ func canManageAPIKeys(method, role string) bool {
 	return true
 }
 
+func canMutateFlags(method, role string) bool {
+	if method == http.MethodPost || method == http.MethodDelete || method == http.MethodPut || method == http.MethodPatch {
+		return isAdminRole(role)
+	}
+
+	return true
+}
+
 func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 	// Check if admin user exists
 	exists, err := h.Repo.HasAdminUsers(r.Context())
@@ -456,6 +464,24 @@ func (h *Handler) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *repository.Project, subPath []string) {
+	session, ok := r.Context().Value(sessionContextKey).(repository.AdminSession)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		user, err := h.Repo.GetAdminUserByID(r.Context(), session.AdminUserID)
+		if err != nil {
+			http.Error(w, "User not found", http.StatusUnauthorized)
+			return
+		}
+		if !canMutateFlags(r.Method, user.Role) {
+			http.Error(w, "Forbidden: admin role required", http.StatusForbidden)
+			return
+		}
+	}
+
 	// POST /projects/{id}/flags
 	if len(subPath) == 0 && r.Method == "POST" {
 		key := r.FormValue("key")
@@ -548,6 +574,11 @@ func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *r
 }
 
 func (h *Handler) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	session, ok := r.Context().Value(sessionContextKey).(repository.AdminSession)
 	if !ok {
 		http.Redirect(w, r, "/login", http.StatusFound)
@@ -646,6 +677,11 @@ func (h *Handler) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	session, ok := r.Context().Value(sessionContextKey).(repository.AdminSession)
 	if !ok {
 		http.Redirect(w, r, "/login", http.StatusFound)
@@ -670,7 +706,7 @@ func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries, err := h.Repo.ListAuditLog(r.Context(), projectID, 100, 0)
+	entries, err := h.Repo.ListAuditLogForProject(r.Context(), projectID, 100)
 	if err != nil {
 		http.Error(w, "Failed to load audit log", http.StatusInternalServerError)
 		return
