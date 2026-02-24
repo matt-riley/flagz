@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/matt-riley/flagz/internal/core"
+	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 )
 
@@ -509,6 +511,124 @@ func TestServiceResolveBooleanUsesVariantsDefaultFallback(t *testing.T) {
 	}
 }
 
+func TestServiceAuditLogRecordedOnMutations(t *testing.T) {
+	ctx := middleware.NewContextWithProjectID(context.Background(), "proj1")
+	repo := newFakeServiceRepository()
+
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	flag := repository.Flag{
+		ProjectID:   "proj1",
+		Key:         "audit-flag",
+		Description: "test",
+		Enabled:     true,
+		Variants:    json.RawMessage(`{}`),
+		Rules:       json.RawMessage(`[]`),
+	}
+
+	if _, err := svc.CreateFlag(ctx, flag); err != nil {
+		t.Fatalf("CreateFlag() error = %v", err)
+	}
+
+	flag.Description = "updated"
+	if _, err := svc.UpdateFlag(ctx, flag); err != nil {
+		t.Fatalf("UpdateFlag() error = %v", err)
+	}
+
+	if err := svc.DeleteFlag(ctx, "proj1", "audit-flag"); err != nil {
+		t.Fatalf("DeleteFlag() error = %v", err)
+	}
+
+	repo.mu.RLock()
+	defer repo.mu.RUnlock()
+
+	if len(repo.auditLogs) != 3 {
+		t.Fatalf("audit log count = %d, want 3", len(repo.auditLogs))
+	}
+
+	wantActions := []string{"create", "update", "delete"}
+	for i, want := range wantActions {
+		if repo.auditLogs[i].Action != want {
+			t.Fatalf("audit log[%d].Action = %q, want %q", i, repo.auditLogs[i].Action, want)
+		}
+		if repo.auditLogs[i].ProjectID != "proj1" {
+			t.Fatalf("audit log[%d].ProjectID = %q, want %q", i, repo.auditLogs[i].ProjectID, "proj1")
+		}
+		if repo.auditLogs[i].FlagKey != "audit-flag" {
+			t.Fatalf("audit log[%d].FlagKey = %q, want %q", i, repo.auditLogs[i].FlagKey, "audit-flag")
+		}
+	}
+}
+
+func TestServiceAuditLogIncludesActorIDsFromContext(t *testing.T) {
+	ctx := middleware.NewContextWithProjectID(context.Background(), "proj1")
+	ctx = middleware.NewContextWithAPIKeyID(ctx, "api-key-1")
+	ctx = middleware.NewContextWithAdminUserID(ctx, "admin-user-1")
+	repo := newFakeServiceRepository()
+
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	flag := repository.Flag{
+		ProjectID:   "proj1",
+		Key:         "actor-ids",
+		Description: "test",
+		Enabled:     true,
+		Variants:    json.RawMessage(`{}`),
+		Rules:       json.RawMessage(`[]`),
+	}
+
+	if _, err := svc.CreateFlag(ctx, flag); err != nil {
+		t.Fatalf("CreateFlag() error = %v", err)
+	}
+
+	repo.mu.RLock()
+	defer repo.mu.RUnlock()
+
+	if len(repo.auditLogs) != 1 {
+		t.Fatalf("audit log count = %d, want 1", len(repo.auditLogs))
+	}
+	if repo.auditLogs[0].APIKeyID != "api-key-1" {
+		t.Fatalf("audit log APIKeyID = %q, want %q", repo.auditLogs[0].APIKeyID, "api-key-1")
+	}
+	if repo.auditLogs[0].AdminUserID != "admin-user-1" {
+		t.Fatalf("audit log AdminUserID = %q, want %q", repo.auditLogs[0].AdminUserID, "admin-user-1")
+	}
+}
+
+func TestServiceMutationSucceedsWhenAuditLogFails(t *testing.T) {
+	ctx := middleware.NewContextWithProjectID(context.Background(), "proj1")
+	repo := newFakeServiceRepository()
+	repo.auditErr = errors.New("audit db down")
+
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	flag := repository.Flag{
+		ProjectID:   "proj1",
+		Key:         "audit-fail",
+		Description: "test",
+		Enabled:     true,
+		Variants:    json.RawMessage(`{}`),
+		Rules:       json.RawMessage(`[]`),
+	}
+
+	created, err := svc.CreateFlag(ctx, flag)
+	if err != nil {
+		t.Fatalf("CreateFlag() error = %v, want nil when audit fails", err)
+	}
+	if created.Key != flag.Key {
+		t.Fatalf("CreateFlag().Key = %q, want %q", created.Key, flag.Key)
+	}
+}
+
 func TestServiceResubscribesAfterInvalidationChannelClose(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -561,6 +681,9 @@ type fakeServiceRepository struct {
 	nextEventID int64
 	publishErr  error
 
+	auditLogs []repository.AuditLogEntry
+	auditErr  error
+
 	requirePublishActiveContext bool
 	publishCtxErr               error
 	publishCtxHasDeadline       bool
@@ -570,6 +693,35 @@ func newFakeServiceRepository() *fakeServiceRepository {
 	return &fakeServiceRepository{
 		flags: make(map[string]map[string]repository.Flag),
 	}
+}
+
+func (f *fakeServiceRepository) InsertAuditLog(_ context.Context, entry repository.AuditLogEntry) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.auditErr != nil {
+		return f.auditErr
+	}
+	f.auditLogs = append(f.auditLogs, entry)
+	return nil
+}
+
+func (f *fakeServiceRepository) ListAuditLog(_ context.Context, projectID string, limit, offset int) ([]repository.AuditLogEntry, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	var result []repository.AuditLogEntry
+	for _, e := range f.auditLogs {
+		if e.ProjectID == projectID {
+			result = append(result, e)
+		}
+	}
+	if offset > len(result) {
+		return nil, nil
+	}
+	result = result[offset:]
+	if limit > 0 && limit < len(result) {
+		result = result[:limit]
+	}
+	return result, nil
 }
 
 func (f *fakeServiceRepository) CreateFlag(_ context.Context, flag repository.Flag) (repository.Flag, error) {
@@ -978,5 +1130,141 @@ func waitForCondition(t *testing.T, timeout time.Duration, check func() bool) {
 			t.Fatal("condition not met before timeout")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// fakeAPIKeyRepository embeds fakeServiceRepository and implements [APIKeyRepository].
+type fakeAPIKeyRepository struct {
+	*fakeServiceRepository
+	keys      map[string][]repository.APIKeyMeta // projectID -> keys
+	nextKeyID int
+}
+
+func newFakeAPIKeyRepository() *fakeAPIKeyRepository {
+	return &fakeAPIKeyRepository{
+		fakeServiceRepository: newFakeServiceRepository(),
+		keys:                  make(map[string][]repository.APIKeyMeta),
+	}
+}
+
+func (f *fakeAPIKeyRepository) CreateAPIKey(_ context.Context, projectID string) (string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nextKeyID++
+	id := fmt.Sprintf("key-%d", f.nextKeyID)
+	f.keys[projectID] = append(f.keys[projectID], repository.APIKeyMeta{
+		ID:        id,
+		ProjectID: projectID,
+		CreatedAt: time.Now(),
+	})
+	return id, "raw-secret", nil
+}
+
+func (f *fakeAPIKeyRepository) ListAPIKeys(_ context.Context, projectID string) ([]repository.APIKeyMeta, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.keys[projectID], nil
+}
+
+func (f *fakeAPIKeyRepository) DeleteAPIKey(_ context.Context, projectID, keyID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	keys := f.keys[projectID]
+	for i, k := range keys {
+		if k.ID == keyID {
+			f.keys[projectID] = append(keys[:i], keys[i+1:]...)
+			return nil
+		}
+	}
+	return pgx.ErrNoRows
+}
+
+func TestCreateAPIKey_ProjectIDValidation(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeAPIKeyRepository()
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, _, err = svc.CreateAPIKey(ctx, "")
+	if !errors.Is(err, ErrProjectIDRequired) {
+		t.Fatalf("CreateAPIKey('') error = %v, want %v", err, ErrProjectIDRequired)
+	}
+}
+
+func TestCreateAPIKey_Success(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeAPIKeyRepository()
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	id, secret, err := svc.CreateAPIKey(ctx, "proj-1")
+	if err != nil {
+		t.Fatalf("CreateAPIKey() error = %v", err)
+	}
+	if id == "" {
+		t.Fatal("CreateAPIKey() returned empty id")
+	}
+	if secret == "" {
+		t.Fatal("CreateAPIKey() returned empty secret")
+	}
+}
+
+func TestListAPIKeys_ProjectIDValidation(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeAPIKeyRepository()
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = svc.ListAPIKeys(ctx, "")
+	if !errors.Is(err, ErrProjectIDRequired) {
+		t.Fatalf("ListAPIKeys('') error = %v, want %v", err, ErrProjectIDRequired)
+	}
+}
+
+func TestDeleteAPIKey_ProjectIDValidation(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeAPIKeyRepository()
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	err = svc.DeleteAPIKey(ctx, "", "some-key")
+	if !errors.Is(err, ErrProjectIDRequired) {
+		t.Fatalf("DeleteAPIKey('', ...) error = %v, want %v", err, ErrProjectIDRequired)
+	}
+}
+
+func TestDeleteAPIKey_KeyIDValidation(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeAPIKeyRepository()
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	err = svc.DeleteAPIKey(ctx, "proj-1", "")
+	if !errors.Is(err, ErrAPIKeyIDRequired) {
+		t.Fatalf("DeleteAPIKey(..., '') error = %v, want %v", err, ErrAPIKeyIDRequired)
+	}
+}
+
+func TestDeleteAPIKey_NotFound(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeAPIKeyRepository()
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	err = svc.DeleteAPIKey(ctx, "proj-1", "nonexistent")
+	if !errors.Is(err, ErrAPIKeyNotFound) {
+		t.Fatalf("DeleteAPIKey(nonexistent) error = %v, want %v", err, ErrAPIKeyNotFound)
 	}
 }
