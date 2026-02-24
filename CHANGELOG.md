@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.7.0](https://github.com/matt-riley/flagz/compare/v1.6.0...v1.7.0) (2026-02-24)
+
+
+### Features
+
+* API key management endpoints ([#43](https://github.com/matt-riley/flagz/issues/43)) ([ffe7e42](https://github.com/matt-riley/flagz/commit/ffe7e42f4826cf7f54babbadbe269c53006f5a9c))
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/matt-riley/flagz to v1.5.0 ([#62](https://github.com/matt-riley/flagz/issues/62)) ([77d9d8c](https://github.com/matt-riley/flagz/commit/77d9d8c69eb380c02e7983c1f6f43e9dfce633a5))
+
 ## [1.6.0](https://github.com/matt-riley/flagz/compare/v1.5.0...v1.6.0) (2026-02-23)
 
 
