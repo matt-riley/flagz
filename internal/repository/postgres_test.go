@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -62,6 +63,20 @@ func TestMarshalNotifyPayload(t *testing.T) {
 func TestListenStatement(t *testing.T) {
 	if got := listenStatement("flag_events"); got != `LISTEN "flag_events"` {
 		t.Fatalf("listenStatement() = %q, want %q", got, `LISTEN "flag_events"`)
+	}
+}
+
+func TestGenerateRandomHex(t *testing.T) {
+	const bytesLen = 16
+	token, err := generateRandomHex(bytesLen)
+	if err != nil {
+		t.Fatalf("generateRandomHex() error = %v", err)
+	}
+	if len(token) != bytesLen*2 {
+		t.Fatalf("generateRandomHex() length = %d, want %d", len(token), bytesLen*2)
+	}
+	if _, err := hex.DecodeString(token); err != nil {
+		t.Fatalf("generateRandomHex() produced non-hex output: %v", err)
 	}
 }
 

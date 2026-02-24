@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 	"github.com/matt-riley/flagz/internal/service"
 )
@@ -112,6 +113,7 @@ func (h *Handler) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 		ctx := r.Context()
 		ctx = context.WithValue(ctx, sessionContextKey, session)
+		ctx = middleware.NewContextWithAdminUserID(ctx, session.AdminUserID)
 		next(w, r.WithContext(ctx))
 	}
 }
