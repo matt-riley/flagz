@@ -9,16 +9,7 @@ func (r *PostgresRepository) CreateAPIKeyForProject(ctx context.Context, project
 
 // ListAPIKeysForProject returns API keys newest-first for admin display.
 func (r *PostgresRepository) ListAPIKeysForProject(ctx context.Context, projectID string) ([]APIKeyMeta, error) {
-	keys, err := r.ListAPIKeys(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-
-	for i, j := 0, len(keys)-1; i < j; i, j = i+1, j-1 {
-		keys[i], keys[j] = keys[j], keys[i]
-	}
-
-	return keys, nil
+	return r.listAPIKeys(ctx, projectID, true)
 }
 
 // DeleteAPIKeyByID revokes an API key scoped to the provided project.

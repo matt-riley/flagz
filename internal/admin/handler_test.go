@@ -79,9 +79,9 @@ func TestRenderAuditLogTemplate(t *testing.T) {
 	err := Render(&buf, "audit_log.html", map[string]any{
 		"User":    repository.AdminUser{Username: "admin", Role: "admin"},
 		"Project": repository.Project{ID: "proj-1", Name: "Test Project"},
-		"Entries": []repository.FlagEvent{
-			{EventID: 1, FlagKey: "dark-mode", EventType: "created", CreatedAt: time.Now()},
-			{EventID: 2, FlagKey: "dark-mode", EventType: "updated", CreatedAt: time.Now()},
+		"Entries": []repository.AuditLogEntry{
+			{ID: 1, FlagKey: "dark-mode", Action: "flag_update", CreatedAt: time.Now()},
+			{ID: 2, FlagKey: "", Action: "admin_login", CreatedAt: time.Now()},
 		},
 		"CSRFToken": "token123",
 	})
@@ -95,8 +95,8 @@ func TestRenderAuditLogTemplate(t *testing.T) {
 	if !strings.Contains(out, "dark-mode") {
 		t.Error("expected flag key in output")
 	}
-	if !strings.Contains(out, "created") {
-		t.Error("expected event type in output")
+	if !strings.Contains(out, "flag_update") {
+		t.Error("expected action in output")
 	}
 }
 
@@ -105,7 +105,7 @@ func TestRenderAuditLogTemplate_Empty(t *testing.T) {
 	err := Render(&buf, "audit_log.html", map[string]any{
 		"User":      repository.AdminUser{Username: "admin", Role: "admin"},
 		"Project":   repository.Project{ID: "proj-1", Name: "Test Project"},
-		"Entries":   []repository.FlagEvent{},
+		"Entries":   []repository.AuditLogEntry{},
 		"CSRFToken": "token123",
 	})
 	if err != nil {
@@ -113,6 +113,29 @@ func TestRenderAuditLogTemplate_Empty(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "No audit log entries found") {
 		t.Error("expected empty state message")
+	}
+}
+
+func TestRenderProjectTemplate_ViewerRole(t *testing.T) {
+	var buf bytes.Buffer
+	err := Render(&buf, "project.html", map[string]any{
+		"User":      repository.AdminUser{Username: "viewer", Role: "viewer"},
+		"Project":   repository.Project{ID: "proj-1", Name: "Test Project"},
+		"Flags":     []repository.Flag{{Key: "dark-mode", Enabled: true}},
+		"CSRFToken": "token123",
+	})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "New Flag") {
+		t.Error("viewer should not see New Flag control")
+	}
+	if strings.Contains(out, "hx-delete=\"/projects/proj-1/flags/dark-mode\"") {
+		t.Error("viewer should not see delete control")
+	}
+	if strings.Contains(out, "hx-post=\"/projects/proj-1/flags/dark-mode/toggle\"") {
+		t.Error("viewer should not see toggle mutation control")
 	}
 }
 

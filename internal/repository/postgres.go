@@ -401,12 +401,26 @@ func (r *PostgresRepository) CreateAPIKey(ctx context.Context, projectID string)
 // ListAPIKeys returns metadata for all non-revoked API keys belonging to the
 // given project. Secrets are never included.
 func (r *PostgresRepository) ListAPIKeys(ctx context.Context, projectID string) ([]APIKeyMeta, error) {
-	rows, err := r.pool.Query(ctx, `
+	return r.listAPIKeys(ctx, projectID, false)
+}
+
+func (r *PostgresRepository) listAPIKeys(ctx context.Context, projectID string, newestFirst bool) ([]APIKeyMeta, error) {
+	query := `
 		SELECT id, project_id, created_at
 		FROM api_keys
 		WHERE project_id = $1 AND revoked_at IS NULL
 		ORDER BY created_at
-	`, projectID)
+	`
+	if newestFirst {
+		query = `
+		SELECT id, project_id, created_at
+		FROM api_keys
+		WHERE project_id = $1 AND revoked_at IS NULL
+		ORDER BY created_at DESC
+	`
+	}
+
+	rows, err := r.pool.Query(ctx, query, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list api keys: %w", err)
 	}

@@ -588,6 +588,8 @@ func (h *Handler) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 		if listErr != nil {
 			h.log.Error("failed to list API keys", "project_id", projectID, "error", listErr)
 		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Pragma", "no-cache")
 		if renderErr := Render(w, "api_keys.html", map[string]any{
 			"User":      user,
 			"Project":   project,

@@ -14,26 +14,22 @@
         <table class="min-w-full leading-normal">
             <thead>
                 <tr>
-                    <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Event ID</th>
+                    <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Entry ID</th>
+                    <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Action</th>
                     <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Flag Key</th>
-                    <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Event Type</th>
                     <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Timestamp</th>
                 </tr>
             </thead>
             <tbody>
                 {{range .Entries}}
                 <tr>
-                    <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm font-mono">{{.EventID}}</td>
-                    <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm font-mono">{{.FlagKey}}</td>
+                    <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm font-mono">{{.ID}}</td>
                     <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">
-                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full
-                            {{if eq .EventType "created"}}bg-green-100 text-green-800
-                            {{else if eq .EventType "updated"}}bg-blue-100 text-blue-800
-                            {{else if eq .EventType "deleted"}}bg-red-100 text-red-800
-                            {{else}}bg-gray-100 text-gray-800{{end}}">
-                            {{.EventType}}
+                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                            {{.Action}}
                         </span>
                     </td>
+                    <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm font-mono">{{if .FlagKey}}{{.FlagKey}}{{else}}—{{end}}</td>
                     <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">{{formatTime .CreatedAt}}</td>
                 </tr>
                 {{else}}
