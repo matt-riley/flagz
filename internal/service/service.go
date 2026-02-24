@@ -49,6 +49,8 @@ var (
 	ErrAPIKeyNotFound = errors.New("api key not found")
 	// ErrAPIKeyIDRequired is returned when an API key ID is empty or blank.
 	ErrAPIKeyIDRequired = errors.New("api key ID is required")
+
+	errAPIKeyManagementNotSupported = errors.New("api key management not supported")
 )
 
 // Repository defines the persistence operations required by [Service].
@@ -410,9 +412,9 @@ func (s *Service) CreateAPIKey(ctx context.Context, projectID string) (string, s
 	if strings.TrimSpace(projectID) == "" {
 		return "", "", ErrProjectIDRequired
 	}
-	repo, ok := s.repo.(APIKeyRepository)
-	if !ok {
-		return "", "", errors.New("api key management not supported")
+	repo, err := s.apiKeyRepository()
+	if err != nil {
+		return "", "", err
 	}
 	return repo.CreateAPIKey(ctx, projectID)
 }
@@ -423,9 +425,9 @@ func (s *Service) ListAPIKeys(ctx context.Context, projectID string) ([]reposito
 	if strings.TrimSpace(projectID) == "" {
 		return nil, ErrProjectIDRequired
 	}
-	repo, ok := s.repo.(APIKeyRepository)
-	if !ok {
-		return nil, errors.New("api key management not supported")
+	repo, err := s.apiKeyRepository()
+	if err != nil {
+		return nil, err
 	}
 	return repo.ListAPIKeys(ctx, projectID)
 }
@@ -439,11 +441,11 @@ func (s *Service) DeleteAPIKey(ctx context.Context, projectID, keyID string) err
 	if strings.TrimSpace(keyID) == "" {
 		return ErrAPIKeyIDRequired
 	}
-	repo, ok := s.repo.(APIKeyRepository)
-	if !ok {
-		return errors.New("api key management not supported")
+	repo, err := s.apiKeyRepository()
+	if err != nil {
+		return err
 	}
-	err := repo.DeleteAPIKey(ctx, projectID, keyID)
+	err = repo.DeleteAPIKey(ctx, projectID, keyID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrAPIKeyNotFound
@@ -451,6 +453,15 @@ func (s *Service) DeleteAPIKey(ctx context.Context, projectID, keyID string) err
 		return fmt.Errorf("delete api key: %w", err)
 	}
 	return nil
+}
+
+func (s *Service) apiKeyRepository() (APIKeyRepository, error) {
+	repo, ok := s.repo.(APIKeyRepository)
+	if !ok {
+		return nil, errAPIKeyManagementNotSupported
+	}
+
+	return repo, nil
 }
 
 // ListEventsSinceForKey returns flag events for a specific key with IDs greater
