@@ -6,6 +6,8 @@ package repository
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -14,6 +16,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/matt-riley/flagz/internal/middleware"
 )
 
 const (
@@ -72,6 +76,14 @@ type APIKey struct {
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
 }
 
+// APIKeyMeta contains non-sensitive metadata for an API key, suitable for
+// listing keys without exposing secrets.
+type APIKeyMeta struct {
+	ID        string    `json:"id"`
+	ProjectID string    `json:"project_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // FlagEvent represents a change event for a flag, stored in the flag_events
 // table and used to drive SSE and gRPC streaming.
 type FlagEvent struct {
@@ -82,7 +94,6 @@ type FlagEvent struct {
 	Payload   json.RawMessage `json:"payload"`
 	CreatedAt time.Time       `json:"created_at"`
 }
-
 
 // AuditLogEntry records a mutation performed on a flag for audit purposes.
 type AuditLogEntry struct {
@@ -299,6 +310,83 @@ func (r *PostgresRepository) ValidateAPIKey(ctx context.Context, id string) (str
 	}
 
 	return keyHash, projectID, nil
+}
+
+// CreateAPIKey generates a new API key for the given project, storing a bcrypt
+// hash of the secret. The raw secret is returned exactly once; it cannot be
+// retrieved later.
+func (r *PostgresRepository) CreateAPIKey(ctx context.Context, projectID string) (string, string, error) {
+	keyID, err := generateRandomHex(16)
+	if err != nil {
+		return "", "", fmt.Errorf("generate key id: %w", err)
+	}
+
+	secret, err := generateRandomHex(32)
+	if err != nil {
+		return "", "", fmt.Errorf("generate secret: %w", err)
+	}
+
+	hash, err := middleware.HashAPIKey(secret)
+	if err != nil {
+		return "", "", fmt.Errorf("hash api key: %w", err)
+	}
+
+	_, err = r.pool.Exec(ctx, `
+		INSERT INTO api_keys (id, project_id, name, key_hash)
+		VALUES ($1, $2, $3, $4)
+	`, keyID, projectID, "api-key-"+keyID[:8], hash)
+	if err != nil {
+		return "", "", fmt.Errorf("create api key: %w", err)
+	}
+
+	return keyID, secret, nil
+}
+
+// ListAPIKeys returns metadata for all non-revoked API keys belonging to the
+// given project. Secrets are never included.
+func (r *PostgresRepository) ListAPIKeys(ctx context.Context, projectID string) ([]APIKeyMeta, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, project_id, created_at
+		FROM api_keys
+		WHERE project_id = $1 AND revoked_at IS NULL
+		ORDER BY created_at
+	`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list api keys: %w", err)
+	}
+	defer rows.Close()
+
+	keys := make([]APIKeyMeta, 0)
+	for rows.Next() {
+		var k APIKeyMeta
+		if err := rows.Scan(&k.ID, &k.ProjectID, &k.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan api key: %w", err)
+		}
+		keys = append(keys, k)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list api keys rows: %w", err)
+	}
+
+	return keys, nil
+}
+
+// DeleteAPIKey soft-deletes an API key by setting its revoked_at timestamp.
+// Returns pgx.ErrNoRows (wrapped) if the key does not exist or is already
+// revoked.
+func (r *PostgresRepository) DeleteAPIKey(ctx context.Context, projectID, keyID string) error {
+	commandTag, err := r.pool.Exec(ctx, `
+		UPDATE api_keys SET revoked_at = NOW()
+		WHERE id = $1 AND project_id = $2 AND revoked_at IS NULL
+	`, keyID, projectID)
+	if err != nil {
+		return fmt.Errorf("delete api key: %w", err)
+	}
+	if commandTag.RowsAffected() == 0 {
+		return fmt.Errorf("delete api key: %w", pgx.ErrNoRows)
+	}
+	return nil
 }
 
 // ListEventsSince returns up to the configured event batch size (default 1000)
@@ -695,9 +783,16 @@ func (r *PostgresRepository) ListAuditLog(ctx context.Context, projectID string,
 	}
 	return entries, nil
 }
-
 func listenStatement(channel string) string {
 	return fmt.Sprintf("LISTEN %s", pgx.Identifier{channel}.Sanitize())
+}
+
+func generateRandomHex(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func marshalNotifyPayload(event FlagEvent) (string, error) {

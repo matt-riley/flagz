@@ -123,6 +123,9 @@ func NewHTTPHandlerWithOptions(svc Service, streamPollInterval time.Duration, m 
 	mux.HandleFunc("DELETE /v1/flags/{key}", server.handleDeleteFlag)
 	mux.HandleFunc("POST /v1/evaluate", server.handleEvaluate)
 	mux.HandleFunc("GET /v1/stream", server.handleStream)
+	mux.HandleFunc("POST /v1/api-keys", server.handleCreateAPIKey)
+	mux.HandleFunc("GET /v1/api-keys", server.handleListAPIKeys)
+	mux.HandleFunc("DELETE /v1/api-keys/{id}", server.handleDeleteAPIKey)
 	mux.HandleFunc("GET /v1/audit-log", server.handleListAuditLog)
 	mux.HandleFunc("GET /healthz", server.handleHealthz)
 	mux.HandleFunc("GET /metrics", server.handleMetrics)
@@ -504,6 +507,63 @@ func (s *HTTPServer) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *HTTPServer) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := middleware.ProjectIDFromContext(r.Context())
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	keyID, secret, err := s.service.CreateAPIKey(r.Context(), projectID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	writeJSON(w, http.StatusCreated, map[string]string{
+		"id":     keyID,
+		"secret": keyID + "." + secret,
+	})
+}
+
+func (s *HTTPServer) handleListAPIKeys(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := middleware.ProjectIDFromContext(r.Context())
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	keys, err := s.service.ListAPIKeys(r.Context(), projectID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, keys)
+}
+
+func (s *HTTPServer) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := middleware.ProjectIDFromContext(r.Context())
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	keyID := strings.TrimSpace(r.PathValue("id"))
+	if keyID == "" {
+		writeJSONError(w, http.StatusBadRequest, "api key ID is required")
+		return
+	}
+
+	if err := s.service.DeleteAPIKey(r.Context(), projectID, keyID); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
 func (s *HTTPServer) handleListAuditLog(w http.ResponseWriter, r *http.Request) {
 	projectID, ok := middleware.ProjectIDFromContext(r.Context())
 	if !ok {
@@ -538,7 +598,6 @@ func (s *HTTPServer) handleListAuditLog(w http.ResponseWriter, r *http.Request) 
 
 	writeJSON(w, http.StatusOK, entries)
 }
-
 func (s *HTTPServer) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -580,6 +639,10 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		writeJSONError(w, http.StatusBadRequest, serviceErrorMessage(err))
 	case errors.Is(err, service.ErrFlagNotFound):
 		writeJSONError(w, http.StatusNotFound, serviceErrorMessage(err))
+	case errors.Is(err, service.ErrAPIKeyNotFound):
+		writeJSONError(w, http.StatusNotFound, serviceErrorMessage(err))
+	case errors.Is(err, service.ErrAPIKeyIDRequired):
+		writeJSONError(w, http.StatusBadRequest, serviceErrorMessage(err))
 	case errors.Is(err, context.Canceled):
 		writeJSONError(w, http.StatusRequestTimeout, serviceErrorMessage(err))
 	default:
@@ -599,6 +662,10 @@ func serviceErrorMessage(err error) string {
 		return "project ID is required"
 	case errors.Is(err, service.ErrFlagNotFound):
 		return "flag not found"
+	case errors.Is(err, service.ErrAPIKeyNotFound):
+		return "api key not found"
+	case errors.Is(err, service.ErrAPIKeyIDRequired):
+		return "api key ID is required"
 	case errors.Is(err, context.Canceled):
 		return "request canceled"
 	default:

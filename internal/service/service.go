@@ -45,6 +45,12 @@ var (
 	ErrFlagKeyRequired = errors.New("flag key is required")
 	// ErrProjectIDRequired is returned when a project ID is empty or blank.
 	ErrProjectIDRequired = errors.New("project ID is required")
+	// ErrAPIKeyNotFound is returned when a requested API key does not exist.
+	ErrAPIKeyNotFound = errors.New("api key not found")
+	// ErrAPIKeyIDRequired is returned when an API key ID is empty or blank.
+	ErrAPIKeyIDRequired = errors.New("api key ID is required")
+
+	errAPIKeyManagementNotSupported = errors.New("api key management not supported")
 )
 
 // Repository defines the persistence operations required by [Service].
@@ -60,6 +66,14 @@ type Repository interface {
 	PublishFlagEvent(ctx context.Context, event repository.FlagEvent) (repository.FlagEvent, error)
 	InsertAuditLog(ctx context.Context, entry repository.AuditLogEntry) error
 	ListAuditLog(ctx context.Context, projectID string, limit, offset int) ([]repository.AuditLogEntry, error)
+}
+
+// APIKeyRepository defines the persistence operations for API key management.
+// It is optionally satisfied by [repository.PostgresRepository].
+type APIKeyRepository interface {
+	CreateAPIKey(ctx context.Context, projectID string) (string, string, error)
+	ListAPIKeys(ctx context.Context, projectID string) ([]repository.APIKeyMeta, error)
+	DeleteAPIKey(ctx context.Context, projectID, keyID string) error
 }
 
 type cacheInvalidationSubscriber interface {
@@ -390,6 +404,64 @@ func (s *Service) ListEventsSince(ctx context.Context, projectID string, eventID
 	}
 
 	return events, nil
+}
+
+// CreateAPIKey generates a new API key for the given project. The raw secret
+// is returned exactly once and cannot be retrieved later.
+func (s *Service) CreateAPIKey(ctx context.Context, projectID string) (string, string, error) {
+	if strings.TrimSpace(projectID) == "" {
+		return "", "", ErrProjectIDRequired
+	}
+	repo, err := s.apiKeyRepository()
+	if err != nil {
+		return "", "", err
+	}
+	return repo.CreateAPIKey(ctx, projectID)
+}
+
+// ListAPIKeys returns metadata for all non-revoked API keys belonging to the
+// given project.
+func (s *Service) ListAPIKeys(ctx context.Context, projectID string) ([]repository.APIKeyMeta, error) {
+	if strings.TrimSpace(projectID) == "" {
+		return nil, ErrProjectIDRequired
+	}
+	repo, err := s.apiKeyRepository()
+	if err != nil {
+		return nil, err
+	}
+	return repo.ListAPIKeys(ctx, projectID)
+}
+
+// DeleteAPIKey revokes an API key. Returns [ErrAPIKeyNotFound] if the key does
+// not exist or is already revoked.
+func (s *Service) DeleteAPIKey(ctx context.Context, projectID, keyID string) error {
+	if strings.TrimSpace(projectID) == "" {
+		return ErrProjectIDRequired
+	}
+	if strings.TrimSpace(keyID) == "" {
+		return ErrAPIKeyIDRequired
+	}
+	repo, err := s.apiKeyRepository()
+	if err != nil {
+		return err
+	}
+	err = repo.DeleteAPIKey(ctx, projectID, keyID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAPIKeyNotFound
+		}
+		return fmt.Errorf("delete api key: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) apiKeyRepository() (APIKeyRepository, error) {
+	repo, ok := s.repo.(APIKeyRepository)
+	if !ok {
+		return nil, errAPIKeyManagementNotSupported
+	}
+
+	return repo, nil
 }
 
 // ListEventsSinceForKey returns flag events for a specific key with IDs greater

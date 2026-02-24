@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -1129,5 +1130,141 @@ func waitForCondition(t *testing.T, timeout time.Duration, check func() bool) {
 			t.Fatal("condition not met before timeout")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// fakeAPIKeyRepository embeds fakeServiceRepository and implements [APIKeyRepository].
+type fakeAPIKeyRepository struct {
+	*fakeServiceRepository
+	keys      map[string][]repository.APIKeyMeta // projectID -> keys
+	nextKeyID int
+}
+
+func newFakeAPIKeyRepository() *fakeAPIKeyRepository {
+	return &fakeAPIKeyRepository{
+		fakeServiceRepository: newFakeServiceRepository(),
+		keys:                  make(map[string][]repository.APIKeyMeta),
+	}
+}
+
+func (f *fakeAPIKeyRepository) CreateAPIKey(_ context.Context, projectID string) (string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nextKeyID++
+	id := fmt.Sprintf("key-%d", f.nextKeyID)
+	f.keys[projectID] = append(f.keys[projectID], repository.APIKeyMeta{
+		ID:        id,
+		ProjectID: projectID,
+		CreatedAt: time.Now(),
+	})
+	return id, "raw-secret", nil
+}
+
+func (f *fakeAPIKeyRepository) ListAPIKeys(_ context.Context, projectID string) ([]repository.APIKeyMeta, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.keys[projectID], nil
+}
+
+func (f *fakeAPIKeyRepository) DeleteAPIKey(_ context.Context, projectID, keyID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	keys := f.keys[projectID]
+	for i, k := range keys {
+		if k.ID == keyID {
+			f.keys[projectID] = append(keys[:i], keys[i+1:]...)
+			return nil
+		}
+	}
+	return pgx.ErrNoRows
+}
+
+func TestCreateAPIKey_ProjectIDValidation(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeAPIKeyRepository()
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, _, err = svc.CreateAPIKey(ctx, "")
+	if !errors.Is(err, ErrProjectIDRequired) {
+		t.Fatalf("CreateAPIKey('') error = %v, want %v", err, ErrProjectIDRequired)
+	}
+}
+
+func TestCreateAPIKey_Success(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeAPIKeyRepository()
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	id, secret, err := svc.CreateAPIKey(ctx, "proj-1")
+	if err != nil {
+		t.Fatalf("CreateAPIKey() error = %v", err)
+	}
+	if id == "" {
+		t.Fatal("CreateAPIKey() returned empty id")
+	}
+	if secret == "" {
+		t.Fatal("CreateAPIKey() returned empty secret")
+	}
+}
+
+func TestListAPIKeys_ProjectIDValidation(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeAPIKeyRepository()
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = svc.ListAPIKeys(ctx, "")
+	if !errors.Is(err, ErrProjectIDRequired) {
+		t.Fatalf("ListAPIKeys('') error = %v, want %v", err, ErrProjectIDRequired)
+	}
+}
+
+func TestDeleteAPIKey_ProjectIDValidation(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeAPIKeyRepository()
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	err = svc.DeleteAPIKey(ctx, "", "some-key")
+	if !errors.Is(err, ErrProjectIDRequired) {
+		t.Fatalf("DeleteAPIKey('', ...) error = %v, want %v", err, ErrProjectIDRequired)
+	}
+}
+
+func TestDeleteAPIKey_KeyIDValidation(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeAPIKeyRepository()
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	err = svc.DeleteAPIKey(ctx, "proj-1", "")
+	if !errors.Is(err, ErrAPIKeyIDRequired) {
+		t.Fatalf("DeleteAPIKey(..., '') error = %v, want %v", err, ErrAPIKeyIDRequired)
+	}
+}
+
+func TestDeleteAPIKey_NotFound(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeAPIKeyRepository()
+	svc, err := New(ctx, repo)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	err = svc.DeleteAPIKey(ctx, "proj-1", "nonexistent")
+	if !errors.Is(err, ErrAPIKeyNotFound) {
+		t.Fatalf("DeleteAPIKey(nonexistent) error = %v, want %v", err, ErrAPIKeyNotFound)
 	}
 }
