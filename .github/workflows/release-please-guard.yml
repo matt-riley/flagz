@@ -1,0 +1,125 @@
+name: Release Please Guard
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please-guard
+  cancel-in-progress: false
+
+jobs:
+  heal-stale-release-state:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repair stale merged release PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          repo="${GITHUB_REPOSITORY}"
+          stale_prs="$(gh pr list --state merged --search 'head:release-please--branches--main label:"autorelease: pending"' --json number,mergeCommit,mergedAt,title,url --limit 20)"
+          stale_count="$(echo "${stale_prs}" | jq 'length')"
+          echo "Found ${stale_count} stale merged release PR(s)."
+
+          if [ "${stale_count}" -eq 0 ]; then
+            exit 0
+          fi
+
+          create_release_for_tag() {
+            local tag="$1"
+            local target_sha="$2"
+            local pr_number="$3"
+
+            if gh release view "${tag}" >/dev/null 2>&1; then
+              echo "Release ${tag} already exists."
+              return
+            fi
+
+            gh release create "${tag}" \
+              --target "${target_sha}" \
+              --title "${tag}" \
+              --notes "Backfilled missing release for merged release PR #${pr_number} via Release Please Guard."
+            echo "Created missing release ${tag}."
+          }
+
+          repaired_any=0
+
+          while IFS=$'\t' read -r pr_number merge_sha merged_at; do
+            if [ -z "${merge_sha}" ] || [ "${merge_sha}" = "null" ]; then
+              echo "Skipping PR #${pr_number}: missing merge commit."
+              continue
+            fi
+
+            if [ -n "${merged_at}" ]; then
+              merged_epoch="$(date -u -d "${merged_at}" +%s || true)"
+              now_epoch="$(date -u +%s)"
+              if [ -n "${merged_epoch}" ] && [ "$((now_epoch - merged_epoch))" -lt 1200 ]; then
+                echo "Skipping PR #${pr_number}: merged recently; waiting for normal release flow."
+                continue
+              fi
+            fi
+
+            parent_sha="$(gh api "repos/${repo}/commits/${merge_sha}" --jq '.parents[0].sha')"
+
+            old_manifest_file="$(mktemp)"
+            new_manifest_file="$(mktemp)"
+            old_manifest_b64="$(mktemp)"
+            new_manifest_b64="$(mktemp)"
+
+            if gh api "repos/${repo}/contents/.release-please-manifest.json?ref=${parent_sha}" --jq '.content' > "${old_manifest_b64}" 2>/dev/null; then
+              tr -d '\n' < "${old_manifest_b64}" | base64 -d > "${old_manifest_file}"
+            else
+              echo '{}' > "${old_manifest_file}"
+            fi
+
+            if gh api "repos/${repo}/contents/.release-please-manifest.json?ref=${merge_sha}" --jq '.content' > "${new_manifest_b64}" 2>/dev/null; then
+              tr -d '\n' < "${new_manifest_b64}" | base64 -d > "${new_manifest_file}"
+            else
+              echo '{}' > "${new_manifest_file}"
+            fi
+
+            mapfile -t expected_tags < <(
+              jq -r --slurpfile old "${old_manifest_file}" --slurpfile new "${new_manifest_file}" '
+                ($old[0] // {}) as $o |
+                ($new[0] // {}) as $n |
+                [($n | keys[]) as $k
+                  | select(($o[$k] // "") != $n[$k])
+                  | {path: $k, version: $n[$k]}]
+                | .[]
+                | if .path == "." then "v\(.version)"
+                  elif .path == "clients/go" then "go-client-v\(.version)"
+                  elif .path == "clients/typescript" then "typescript-client-v\(.version)"
+                  else empty
+                  end
+              '
+            )
+
+            rm -f "${old_manifest_file}" "${new_manifest_file}" "${old_manifest_b64}" "${new_manifest_b64}"
+
+            if [ "${#expected_tags[@]}" -eq 0 ]; then
+              echo "No manifest delta detected for PR #${pr_number}; removing stale pending label."
+            else
+              for tag in "${expected_tags[@]}"; do
+                create_release_for_tag "${tag}" "${merge_sha}" "${pr_number}"
+              done
+            fi
+
+            gh pr edit "${pr_number}" --remove-label "autorelease: pending" || true
+            echo "Removed autorelease: pending from PR #${pr_number}."
+            repaired_any=1
+          done < <(echo "${stale_prs}" | jq -r '.[] | "\(.number)\t\(.mergeCommit.oid // "null")\t\(.mergedAt // "")"')
+
+          if [ "${repaired_any}" -eq 1 ]; then
+            gh workflow run release-please.yml --ref main
+            echo "Triggered release-please.yml after stale-state repair."
+          else
+            echo "No eligible stale release PR required repair."
+          fi
