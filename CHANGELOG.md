@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.9.0](https://github.com/matt-riley/flagz/compare/v1.8.0...v1.9.0) (2026-02-24)
+
+
+### Features
+
+* OpenTelemetry instrumentation for repository and service ([#45](https://github.com/matt-riley/flagz/issues/45)) ([28f39a4](https://github.com/matt-riley/flagz/commit/28f39a401bf04dfd6ba2db2c99591a9e54037072))
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/matt-riley/flagz to v1.7.0 ([#65](https://github.com/matt-riley/flagz/issues/65)) ([159f40d](https://github.com/matt-riley/flagz/commit/159f40d243a0bdfa5c6864e3cd083ef35f88620f))
+* make release guard repo-independent ([6d6fcfa](https://github.com/matt-riley/flagz/commit/6d6fcfab56c34ca8e1deae8b5f96e964911edfca))
+
 ## [1.8.0](https://github.com/matt-riley/flagz/compare/v1.7.0...v1.8.0) (2026-02-24)
 
 
