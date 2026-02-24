@@ -752,7 +752,11 @@ func (r *PostgresRepository) InsertAuditLog(ctx context.Context, entry AuditLogE
 		 VALUES ($1, $2, $3, $4, $5, $6)`,
 		entry.ProjectID, entry.APIKeyID, entry.AdminUserID, entry.Action, entry.FlagKey, entry.Details,
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("insert audit log: %w", err)
+	}
+
+	return nil
 }
 
 // ListAuditLog returns audit log entries for a project, newest first.
