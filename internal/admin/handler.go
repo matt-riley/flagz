@@ -466,10 +466,6 @@ func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *r
 			return
 		}
 
-		if session, ok := r.Context().Value(sessionContextKey).(repository.AdminSession); ok {
-			h.logAudit(r.Context(), session.AdminUserID, "flag_toggle", project.ID, flagKey, map[string]any{"enabled": repoFlag.Enabled})
-		}
-
 		// Render just the button if HTMX request
 		if r.Header.Get("HX-Request") == "true" {
 			colorClass := "bg-red-100 text-red-800"
