@@ -73,7 +73,7 @@ func TestBuildAuditEntry_ProjectCreate(t *testing.T) {
 }
 
 func TestBuildAuditEntry_AdminSetup(t *testing.T) {
-	entry, err := buildAuditEntry("user-5", "admin_setup", "", "", map[string]string{"username": "admin"})
+	entry, err := buildAuditEntry("user-5", "admin_setup", defaultProjectID, "", map[string]string{"username": "admin"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
