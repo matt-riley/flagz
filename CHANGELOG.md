@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/matt-riley/flagz/compare/v1.7.0...v1.8.0) (2026-02-24)
+
+
+### Features
+
+* admin action audit logging ([#44](https://github.com/matt-riley/flagz/issues/44)) ([4caa06d](https://github.com/matt-riley/flagz/commit/4caa06d989b634dcc6208c482b85bad4f7ed833b))
+
 ## [1.7.0](https://github.com/matt-riley/flagz/compare/v1.6.0...v1.7.0) (2026-02-24)
 
 
