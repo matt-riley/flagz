@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -23,6 +24,11 @@ import (
 type adminContextKey string
 
 const sessionContextKey adminContextKey = "admin_session"
+
+const (
+	adminAuditWriteTimeout = 2 * time.Second
+	defaultProjectID       = "11111111-1111-1111-1111-111111111111"
+)
 
 type Handler struct {
 	Repo          *repository.PostgresRepository
@@ -185,7 +191,8 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if _, err := h.Repo.CreateAdminUser(r.Context(), username, hash); err != nil {
+		user, err := h.Repo.CreateAdminUser(r.Context(), username, hash)
+		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 				http.Redirect(w, r, "/login", http.StatusFound)
@@ -198,9 +205,7 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if u, err := h.Repo.GetAdminUserByUsername(r.Context(), username); err == nil {
-			h.logAudit(r.Context(), u.ID, "admin_setup", "", "", map[string]string{"username": username})
-		}
+		h.logAudit(r.Context(), user.ID, "admin_setup", defaultProjectID, "", map[string]string{"username": username})
 
 		http.Redirect(w, r, "/login", http.StatusFound)
 	}
@@ -248,7 +253,7 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 				remoteAddr = strings.TrimSpace(first)
 			}
 		}
-		
+
 		if allowed := h.SessionMgr.CheckLoginRateLimit(remoteAddr); !allowed {
 			if err := Render(w, "login.html", map[string]any{"Error": "Too many attempts. Please try again later."}); err != nil {
 				h.log.Error("render error", "error", err)
@@ -283,7 +288,7 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		h.SessionMgr.SetSessionCookie(w, token)
 
-		h.logAudit(r.Context(), user.ID, "admin_login", "", "", nil)
+		h.logAudit(r.Context(), user.ID, "admin_login", defaultProjectID, "", nil)
 
 		http.Redirect(w, r, "/", http.StatusFound)
 	}
@@ -427,7 +432,7 @@ func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *r
 			Variants:    []byte("null"), // Default null variants
 			Rules:       []byte("[]"),   // Default empty rules
 		}
-		
+
 		_, err := h.Service.CreateFlag(r.Context(), flag)
 		if err != nil {
 			http.Error(w, "Failed to create flag: "+err.Error(), http.StatusInternalServerError)
@@ -451,7 +456,7 @@ func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *r
 			http.NotFound(w, r)
 			return
 		}
-		
+
 		repoFlag.Enabled = !repoFlag.Enabled
 		_, err = h.Service.UpdateFlag(r.Context(), repoFlag)
 		if err != nil {
@@ -491,14 +496,14 @@ func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *r
 		http.Redirect(w, r, fmt.Sprintf("/projects/%s", project.ID), http.StatusFound)
 		return
 	}
-	
+
 	// DELETE /projects/{id}/flags/{key}
 	if len(subPath) == 1 && r.Method == "DELETE" {
 		if err := h.Service.DeleteFlag(r.Context(), project.ID, flagKey); err != nil {
 			http.Error(w, "Failed to delete flag", http.StatusInternalServerError)
 			return
 		}
-		
+
 		if r.Header.Get("HX-Request") == "true" {
 			w.WriteHeader(http.StatusOK) // Empty response removes the element
 			return
@@ -536,11 +541,27 @@ func (h *Handler) validateDoubleSubmitCSRF(r *http.Request) bool {
 func (h *Handler) logAudit(ctx context.Context, adminUserID, action, projectID, flagKey string, details any) {
 	entry, err := buildAuditEntry(adminUserID, action, projectID, flagKey, details)
 	if err != nil {
-		slog.Error("audit log: marshal details", "err", err)
+		h.log.Error("audit log: marshal details",
+			"error", err,
+			"action", action,
+			"project_id", projectID,
+			"flag_key", flagKey,
+			"admin_user_id", adminUserID,
+		)
 		return
 	}
-	if err := h.Repo.InsertAuditLog(ctx, entry); err != nil {
-		slog.Error("audit log", "err", err)
+
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), adminAuditWriteTimeout)
+	defer cancel()
+
+	if err := h.Repo.InsertAuditLog(writeCtx, entry); err != nil {
+		h.log.Error("audit log write failed",
+			"error", err,
+			"action", action,
+			"project_id", projectID,
+			"flag_key", flagKey,
+			"admin_user_id", adminUserID,
+		)
 	}
 }
 
