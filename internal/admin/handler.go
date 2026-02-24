@@ -670,7 +670,7 @@ func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries, err := h.Repo.ListAuditLogForProject(r.Context(), projectID, 100)
+	entries, err := h.Repo.ListAuditLog(r.Context(), projectID, 100, 0)
 	if err != nil {
 		http.Error(w, "Failed to load audit log", http.StatusInternalServerError)
 		return
