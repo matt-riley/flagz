@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -12,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -23,6 +25,11 @@ import (
 type adminContextKey string
 
 const sessionContextKey adminContextKey = "admin_session"
+
+const (
+	adminAuditWriteTimeout = 2 * time.Second
+	defaultProjectID       = "11111111-1111-1111-1111-111111111111"
+)
 
 type Handler struct {
 	Repo          *repository.PostgresRepository
@@ -186,7 +193,8 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if _, err := h.Repo.CreateAdminUser(r.Context(), username, hash); err != nil {
+		user, err := h.Repo.CreateAdminUser(r.Context(), username, hash)
+		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 				http.Redirect(w, r, "/login", http.StatusFound)
@@ -198,6 +206,8 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+
+		h.logAudit(r.Context(), user.ID, "admin_setup", defaultProjectID, "", map[string]string{"username": username})
 
 		http.Redirect(w, r, "/login", http.StatusFound)
 	}
@@ -280,6 +290,8 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		h.SessionMgr.SetSessionCookie(w, token)
 
+		h.logAudit(r.Context(), user.ID, "admin_login", defaultProjectID, "", nil)
+
 		http.Redirect(w, r, "/", http.StatusFound)
 	}
 }
@@ -328,13 +340,22 @@ func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleProjects(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
+		session, ok := r.Context().Value(sessionContextKey).(repository.AdminSession)
+		if !ok {
+			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+
 		name := r.FormValue("name")
 		desc := r.FormValue("description")
 
-		if _, err := h.Repo.CreateProject(r.Context(), name, desc); err != nil {
+		p, err := h.Repo.CreateProject(r.Context(), name, desc)
+		if err != nil {
 			http.Error(w, "Failed to create project", http.StatusInternalServerError)
 			return
 		}
+
+		h.logAudit(r.Context(), session.AdminUserID, "project_create", p.ID, "", map[string]string{"name": name})
 
 		http.Redirect(w, r, "/", http.StatusFound)
 	}
@@ -511,4 +532,53 @@ func (h *Handler) validateDoubleSubmitCSRF(r *http.Request) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(formToken)) == 1
+}
+
+// logAudit writes an audit log entry on a best-effort basis.
+// Failures are logged but never propagated to the caller.
+func (h *Handler) logAudit(ctx context.Context, adminUserID, action, projectID, flagKey string, details any) {
+	entry, err := buildAuditEntry(adminUserID, action, projectID, flagKey, details)
+	if err != nil {
+		h.log.Error("audit log: marshal details",
+			"error", err,
+			"action", action,
+			"project_id", projectID,
+			"flag_key", flagKey,
+			"admin_user_id", adminUserID,
+		)
+		return
+	}
+
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), adminAuditWriteTimeout)
+	defer cancel()
+
+	if err := h.Repo.InsertAuditLog(writeCtx, entry); err != nil {
+		h.log.Error("audit log write failed",
+			"error", err,
+			"action", action,
+			"project_id", projectID,
+			"flag_key", flagKey,
+			"admin_user_id", adminUserID,
+		)
+	}
+}
+
+// buildAuditEntry constructs an AuditLogEntry, marshalling the details to JSON.
+func buildAuditEntry(adminUserID, action, projectID, flagKey string, details any) (repository.AuditLogEntry, error) {
+	var detailsJSON json.RawMessage
+	if details != nil {
+		b, err := json.Marshal(details)
+		if err != nil {
+			return repository.AuditLogEntry{}, err
+		}
+		detailsJSON = b
+	}
+	return repository.AuditLogEntry{
+		ProjectID:   projectID,
+		APIKeyID:    "",
+		AdminUserID: adminUserID,
+		Action:      action,
+		FlagKey:     flagKey,
+		Details:     detailsJSON,
+	}, nil
 }
