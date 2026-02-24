@@ -18,11 +18,16 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 
 	"github.com/matt-riley/flagz/internal/core"
 	"github.com/matt-riley/flagz/internal/middleware"
 	"github.com/matt-riley/flagz/internal/repository"
 )
+
+var svcTracer = otel.Tracer("service")
 
 const (
 	// EventTypeUpdated is the event type emitted when a flag is created or updated.
@@ -219,6 +224,13 @@ func (s *Service) LoadCache(ctx context.Context) error {
 // CreateFlag validates and persists a new flag, updates the cache, and
 // publishes an "updated" event on a best-effort basis.
 func (s *Service) CreateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error) {
+	ctx, span := svcTracer.Start(ctx, "service.CreateFlag")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("flag_key", flag.Key),
+		attribute.String("project_id", flag.ProjectID),
+	)
+
 	if strings.TrimSpace(flag.Key) == "" {
 		return repository.Flag{}, ErrFlagKeyRequired
 	}
@@ -234,6 +246,8 @@ func (s *Service) CreateFlag(ctx context.Context, flag repository.Flag) (reposit
 
 	created, err := s.repo.CreateFlag(ctx, flag)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "create flag failed")
 		return repository.Flag{}, fmt.Errorf("create flag: %w", err)
 	}
 
@@ -248,6 +262,13 @@ func (s *Service) CreateFlag(ctx context.Context, flag repository.Flag) (reposit
 // [ErrFlagNotFound] if the flag does not exist. On success, the cache is
 // updated and an "updated" event is published.
 func (s *Service) UpdateFlag(ctx context.Context, flag repository.Flag) (repository.Flag, error) {
+	ctx, span := svcTracer.Start(ctx, "service.UpdateFlag")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("flag_key", flag.Key),
+		attribute.String("project_id", flag.ProjectID),
+	)
+
 	if strings.TrimSpace(flag.Key) == "" {
 		return repository.Flag{}, ErrFlagKeyRequired
 	}
@@ -265,8 +286,12 @@ func (s *Service) UpdateFlag(ctx context.Context, flag repository.Flag) (reposit
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			s.deleteCachedFlag(flag.ProjectID, flag.Key)
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "flag not found")
 			return repository.Flag{}, ErrFlagNotFound
 		}
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "update flag failed")
 		return repository.Flag{}, fmt.Errorf("update flag: %w", err)
 	}
 
@@ -281,6 +306,13 @@ func (s *Service) UpdateFlag(ctx context.Context, flag repository.Flag) (reposit
 // available and falling back to the repository. Returns [ErrFlagNotFound]
 // if the flag does not exist.
 func (s *Service) GetFlag(ctx context.Context, projectID, key string) (repository.Flag, error) {
+	ctx, span := svcTracer.Start(ctx, "service.GetFlag")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("flag_key", key),
+		attribute.String("project_id", projectID),
+	)
+
 	if strings.TrimSpace(key) == "" {
 		return repository.Flag{}, ErrFlagKeyRequired
 	}
@@ -295,8 +327,12 @@ func (s *Service) GetFlag(ctx context.Context, projectID, key string) (repositor
 	flag, err := s.repo.GetFlag(ctx, projectID, key)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "flag not found")
 			return repository.Flag{}, ErrFlagNotFound
 		}
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "get flag failed")
 		return repository.Flag{}, fmt.Errorf("get flag: %w", err)
 	}
 
@@ -305,7 +341,11 @@ func (s *Service) GetFlag(ctx context.Context, projectID, key string) (repositor
 }
 
 // ListFlags returns all flags for a given project from the in-memory cache, sorted by key.
-func (s *Service) ListFlags(_ context.Context, projectID string) ([]repository.Flag, error) {
+func (s *Service) ListFlags(ctx context.Context, projectID string) ([]repository.Flag, error) {
+	ctx, span := svcTracer.Start(ctx, "service.ListFlags")
+	defer span.End()
+	span.SetAttributes(attribute.String("project_id", projectID))
+
 	if strings.TrimSpace(projectID) == "" {
 		return nil, ErrProjectIDRequired
 	}
@@ -333,6 +373,13 @@ func (s *Service) ListFlags(_ context.Context, projectID string) ([]repository.F
 // does not exist. On success, the cache is updated and a "deleted" event is
 // published.
 func (s *Service) DeleteFlag(ctx context.Context, projectID, key string) error {
+	ctx, span := svcTracer.Start(ctx, "service.DeleteFlag")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("flag_key", key),
+		attribute.String("project_id", projectID),
+	)
+
 	existing, err := s.GetFlag(ctx, projectID, key)
 	if err != nil {
 		return err
@@ -341,8 +388,12 @@ func (s *Service) DeleteFlag(ctx context.Context, projectID, key string) error {
 	if err := s.repo.DeleteFlag(ctx, projectID, key); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			s.deleteCachedFlag(projectID, key)
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "flag not found")
 			return ErrFlagNotFound
 		}
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "delete flag failed")
 		return fmt.Errorf("delete flag: %w", err)
 	}
 
@@ -357,6 +408,13 @@ func (s *Service) DeleteFlag(ctx context.Context, projectID, key string) error {
 // a boolean result. If the flag is not found, the provided default value is
 // returned without error.
 func (s *Service) ResolveBoolean(ctx context.Context, projectID, key string, evalContext core.EvaluationContext, defaultValue bool) (bool, error) {
+	ctx, span := svcTracer.Start(ctx, "service.EvaluateFlag")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("flag_key", key),
+		attribute.String("project_id", projectID),
+	)
+
 	flag, err := s.GetFlag(ctx, projectID, key)
 	if err != nil {
 		if errors.Is(err, ErrFlagNotFound) {

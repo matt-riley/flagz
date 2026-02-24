@@ -18,7 +18,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/matt-riley/flagz/internal/middleware"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
+
+var repoTracer = otel.Tracer("repository")
 
 const (
 	defaultNotifyChannel  = "flag_events"
@@ -152,6 +159,13 @@ func NewPostgresRepositoryWithChannel(pool *pgxpool.Pool, notifyChannel string, 
 // CreateFlag inserts a new flag row and returns the created record with
 // server-generated timestamps.
 func (r *PostgresRepository) CreateFlag(ctx context.Context, flag Flag) (Flag, error) {
+	ctx, span := repoTracer.Start(ctx, "repo.CreateFlag",
+		trace.WithAttributes(
+			attribute.String("flag_key", flag.Key),
+			attribute.String("project_id", flag.ProjectID),
+		))
+	defer span.End()
+
 	var created Flag
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO flags (project_id, key, description, enabled, variants, rules)
@@ -175,6 +189,8 @@ func (r *PostgresRepository) CreateFlag(ctx context.Context, flag Flag) (Flag, e
 		&created.UpdatedAt,
 	)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "create flag failed")
 		return Flag{}, fmt.Errorf("create flag: %w", err)
 	}
 
@@ -184,6 +200,13 @@ func (r *PostgresRepository) CreateFlag(ctx context.Context, flag Flag) (Flag, e
 // UpdateFlag updates an existing flag row identified by project_id and key and returns the
 // updated record. Returns pgx.ErrNoRows (wrapped) if the flag does not exist.
 func (r *PostgresRepository) UpdateFlag(ctx context.Context, flag Flag) (Flag, error) {
+	ctx, span := repoTracer.Start(ctx, "repo.UpdateFlag",
+		trace.WithAttributes(
+			attribute.String("flag_key", flag.Key),
+			attribute.String("project_id", flag.ProjectID),
+		))
+	defer span.End()
+
 	var updated Flag
 	err := r.pool.QueryRow(ctx, `
 		UPDATE flags
@@ -212,6 +235,8 @@ func (r *PostgresRepository) UpdateFlag(ctx context.Context, flag Flag) (Flag, e
 		&updated.UpdatedAt,
 	)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "update flag failed")
 		return Flag{}, fmt.Errorf("update flag: %w", err)
 	}
 
@@ -221,6 +246,13 @@ func (r *PostgresRepository) UpdateFlag(ctx context.Context, flag Flag) (Flag, e
 // GetFlag retrieves a single flag by its project_id and key. Returns pgx.ErrNoRows (wrapped)
 // if not found.
 func (r *PostgresRepository) GetFlag(ctx context.Context, projectID, key string) (Flag, error) {
+	ctx, span := repoTracer.Start(ctx, "repo.GetFlag",
+		trace.WithAttributes(
+			attribute.String("flag_key", key),
+			attribute.String("project_id", projectID),
+		))
+	defer span.End()
+
 	var flag Flag
 	err := r.pool.QueryRow(ctx, `
 		SELECT project_id, key, description, enabled, variants, rules, created_at, updated_at
@@ -237,6 +269,8 @@ func (r *PostgresRepository) GetFlag(ctx context.Context, projectID, key string)
 		&flag.UpdatedAt,
 	)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "get flag failed")
 		return Flag{}, fmt.Errorf("get flag: %w", err)
 	}
 
@@ -245,12 +279,17 @@ func (r *PostgresRepository) GetFlag(ctx context.Context, projectID, key string)
 
 // ListFlags returns all flags across all projects ordered by project_id and key.
 func (r *PostgresRepository) ListFlags(ctx context.Context) ([]Flag, error) {
+	ctx, span := repoTracer.Start(ctx, "repo.ListFlags")
+	defer span.End()
+
 	rows, err := r.pool.Query(ctx, `
 		SELECT project_id, key, description, enabled, variants, rules, created_at, updated_at
 		FROM flags
 		ORDER BY project_id, key
 	`)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "list flags failed")
 		return nil, fmt.Errorf("list flags: %w", err)
 	}
 	defer rows.Close()
@@ -284,11 +323,22 @@ func (r *PostgresRepository) ListFlags(ctx context.Context) ([]Flag, error) {
 // DeleteFlag removes a flag by project_id and key. Returns pgx.ErrNoRows (wrapped) if the
 // flag does not exist.
 func (r *PostgresRepository) DeleteFlag(ctx context.Context, projectID, key string) error {
+	ctx, span := repoTracer.Start(ctx, "repo.DeleteFlag",
+		trace.WithAttributes(
+			attribute.String("flag_key", key),
+			attribute.String("project_id", projectID),
+		))
+	defer span.End()
+
 	commandTag, err := r.pool.Exec(ctx, `DELETE FROM flags WHERE project_id = $1 AND key = $2`, projectID, key)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "delete flag failed")
 		return fmt.Errorf("delete flag: %w", err)
 	}
 	if err := deleteFlagNoRows(commandTag); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "delete flag not found")
 		return err
 	}
 
@@ -298,6 +348,9 @@ func (r *PostgresRepository) DeleteFlag(ctx context.Context, projectID, key stri
 // ValidateAPIKey returns the stored hash and project ID for a non-revoked key ID.
 // Callers should do constant-time comparison outside this package.
 func (r *PostgresRepository) ValidateAPIKey(ctx context.Context, id string) (string, string, error) {
+	ctx, span := repoTracer.Start(ctx, "repo.ValidateAPIKey")
+	defer span.End()
+
 	var keyHash string
 	var projectID string
 	if err := r.pool.QueryRow(ctx, `
@@ -306,6 +359,8 @@ func (r *PostgresRepository) ValidateAPIKey(ctx context.Context, id string) (str
 		WHERE id = $1
 		  AND revoked_at IS NULL
 	`, id).Scan(&keyHash, &projectID); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "validate api key failed")
 		return "", "", fmt.Errorf("validate api key: %w", err)
 	}
 
