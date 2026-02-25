@@ -625,7 +625,7 @@ func (h *Handler) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 		if h.SessionMgr != nil {
 			h.SessionMgr.SetAPIKeyFlash(session.IDHash, projectID.String(), keyID, rawSecret)
 		}
-		http.Redirect(w, r, fmt.Sprintf("/api-keys/%s", projectID.String()), http.StatusSeeOther)
+		http.Redirect(w, r, fmt.Sprintf("/api-keys/%s", projectID.String()), http.StatusFound)
 		return
 	}
 
@@ -679,14 +679,14 @@ func (h *Handler) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Missing key_id", http.StatusBadRequest)
 		return
 	}
-
-	if err := h.Repo.DeleteAPIKeyByID(r.Context(), projectID.String(), keyID); err != nil {
-		http.Error(w, "Failed to delete API key", http.StatusInternalServerError)
-		return
-	}
 	adminUser, ok := r.Context().Value(adminUserContextKey).(repository.AdminUser)
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if err := h.Repo.DeleteAPIKeyByID(r.Context(), projectID.String(), keyID); err != nil {
+		http.Error(w, "Failed to delete API key", http.StatusInternalServerError)
 		return
 	}
 	h.logAudit(r.Context(), adminUser.ID, "api_key_delete", projectID.String(), "", map[string]string{"api_key_id": keyID})
