@@ -1,5 +1,5 @@
 {
-  ".": "1.9.1",
-  "clients/go": "0.2.8",
+  ".": "1.9.2",
+  "clients/go": "0.2.9",
   "clients/typescript": "0.2.0"
 }
