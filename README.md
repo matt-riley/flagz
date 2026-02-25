@@ -63,7 +63,7 @@ GET  /v1/stream    →  SSE: flag updated / deleted events
 
 1. On startup the service loads all flags into an in-memory cache.
 2. Every write (create / update / delete) immediately updates the cache _and_ appends a row to `flag_events`, then fires a best-effort PostgreSQL `NOTIFY` on the `flag_events` channel.
-3. The cache listener wakes on `NOTIFY` (and re-syncs every minute regardless, as a safety net) to stay current.
+3. The cache listener wakes on `NOTIFY` (and re-syncs periodically — every `CACHE_RESYNC_INTERVAL`, default 1 minute — as a safety net) to stay current.
 4. `ListFlags` and all evaluations read exclusively from the cache — the database is never touched during hot-path reads.
 
 ---
@@ -95,7 +95,9 @@ curl -s -H "Authorization: Bearer myapp.my-super-secret" http://localhost:8080/v
 
 ### Creating an API key
 
-flagz doesn't have a key-management API (yet), so you create keys directly in PostgreSQL. A bearer token has the format `<id>.<secret>` — you choose both, hash the secret with bcrypt, and insert the hash.
+Your **first** API key must be bootstrapped directly into PostgreSQL (or through the Admin Portal, if you have it configured). Once you have one valid key, you can create, list, and delete additional keys via the REST API — see [API Keys](#api-keys) below.
+
+For the initial key, a bearer token has the format `<id>.<secret>` — you choose both, hash the secret with bcrypt, and insert the hash.
 
 **Option A: One-liner with `htpasswd`** (if you have Apache utils installed)
 
@@ -157,16 +159,21 @@ Authorization: Bearer myapp.my-super-secret
 
 All configuration is via environment variables.
 
-| Variable               | Required | Default | Description                                         |
-| ---------------------- | -------- | ------- | --------------------------------------------------- |
-| `DATABASE_URL`         | ✅       | —       | PostgreSQL connection string (pgx format)           |
-| `HTTP_ADDR`            |          | `:8080` | Address for the HTTP server                         |
-| `GRPC_ADDR`            |          | `:9090` | Address for the gRPC server                         |
-| `STREAM_POLL_INTERVAL` |          | `1s`    | How often streams poll for new events (must be > 0) |
-| `ADMIN_HOSTNAME`       |          | —       | Hostname for the Admin Portal on Tailscale          |
-| `TS_AUTH_KEY`          |          | —       | Tailscale Auth Key (required if ADMIN_HOSTNAME set) |
-| `TS_STATE_DIR`         |          | `tsnet-state` | Directory to store Tailscale state             |
-| `SESSION_SECRET`       |          | —       | Secret for signing admin sessions (32+ chars)       |
+| Variable               | Required | Default       | Description                                                              |
+| ---------------------- | -------- | ------------- | ------------------------------------------------------------------------ |
+| `DATABASE_URL`         | ✅       | —             | PostgreSQL connection string (pgx format)                                |
+| `HTTP_ADDR`            |          | `:8080`       | Address for the HTTP server                                              |
+| `GRPC_ADDR`            |          | `:9090`       | Address for the gRPC server                                              |
+| `STREAM_POLL_INTERVAL` |          | `1s`          | How often streams poll for new events (must be > 0)                      |
+| `CACHE_RESYNC_INTERVAL`|          | `1m`          | Periodic safety-net cache resync interval (must be > 0)                  |
+| `MAX_JSON_BODY_SIZE`   |          | `1048576`     | Maximum HTTP request body size in bytes (must be > 0)                    |
+| `EVENT_BATCH_SIZE`     |          | `1000`        | Maximum events returned per stream poll query (must be > 0)              |
+| `AUTH_RATE_LIMIT`      |          | `10`          | Max authentication attempts per second before rate-limiting (must be > 0)|
+| `LOG_LEVEL`            |          | `info`        | Log verbosity (`debug`, `info`, `warn`, `error`)                         |
+| `ADMIN_HOSTNAME`       |          | —             | Hostname for the Admin Portal on Tailscale                               |
+| `TS_AUTH_KEY`          |          | —             | Tailscale Auth Key (required if `ADMIN_HOSTNAME` set)                    |
+| `TS_STATE_DIR`         |          | `tsnet-state` | Directory to store Tailscale state                                       |
+| `SESSION_SECRET`       |          | —             | Secret for signing admin sessions (32+ chars, required if `ADMIN_HOSTNAME` set) |
 
 `STREAM_POLL_INTERVAL` accepts any Go duration string: `500ms`, `2s`, `1m`, etc.
 
@@ -286,6 +293,30 @@ All request and response bodies are JSON. Unknown fields in request bodies are r
 | `GET`    | `/v1/flags/{key}` | Get a single flag           |
 | `PUT`    | `/v1/flags/{key}` | Replace a flag              |
 | `DELETE` | `/v1/flags/{key}` | Delete a flag               |
+
+### API Keys
+
+| Method   | Path                  | Description                             |
+| -------- | --------------------- | --------------------------------------- |
+| `POST`   | `/v1/api-keys`        | Create an API key (returns id + secret) |
+| `GET`    | `/v1/api-keys`        | List API key metadata for this project  |
+| `DELETE` | `/v1/api-keys/{id}`   | Revoke an API key                       |
+
+The `POST /v1/api-keys` response is:
+
+```json
+{ "id": "myapp", "secret": "myapp.some-generated-secret" }
+```
+
+The `secret` value is the full bearer token. Store it somewhere safe — it is shown **once** and cannot be retrieved again.
+
+### Audit log
+
+| Method | Path             | Description                                          |
+| ------ | ---------------- | ---------------------------------------------------- |
+| `GET`  | `/v1/audit-log`  | List audit log entries for this project (newest first) |
+
+Supports `limit` (default 50, max 1000) and `offset` query parameters.
 
 **Create a flag**
 
@@ -408,6 +439,13 @@ To resume from a known position, pass the last received event ID:
 
 ```
 Last-Event-ID: 42
+```
+
+To filter events to a single flag, add a `key` query parameter:
+
+```bash
+curl -N -H "Authorization: Bearer <id>.<secret>" \
+     "http://localhost:8080/v1/stream?key=dark-mode"
 ```
 
 Events:
