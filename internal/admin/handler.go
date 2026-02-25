@@ -25,6 +25,7 @@ import (
 type adminContextKey string
 
 const sessionContextKey adminContextKey = "admin_session"
+const adminUserContextKey adminContextKey = "admin_user"
 
 const (
 	adminAuditWriteTimeout = 2 * time.Second
@@ -138,7 +139,8 @@ func (h *Handler) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "Forbidden: admin role required", http.StatusForbidden)
 			return
 		}
-		next(w, r)
+		ctx := context.WithValue(r.Context(), adminUserContextKey, user)
+		next(w, r.WithContext(ctx))
 	}
 }
 
@@ -657,8 +659,6 @@ func (h *Handler) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, hasSession := r.Context().Value(sessionContextKey).(repository.AdminSession)
-
 	projectID := strings.TrimPrefix(r.URL.Path, "/api-keys/delete/")
 	if projectID == "" {
 		http.NotFound(w, r)
@@ -675,9 +675,8 @@ func (h *Handler) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to delete API key", http.StatusInternalServerError)
 		return
 	}
-	if hasSession {
-		h.logAudit(r.Context(), session.AdminUserID, "api_key_delete", projectID, "", map[string]string{"api_key_id": keyID})
-	}
+	adminUser := r.Context().Value(adminUserContextKey).(repository.AdminUser)
+	h.logAudit(r.Context(), adminUser.ID, "api_key_delete", projectID, "", map[string]string{"api_key_id": keyID})
 
 	http.Redirect(w, r, fmt.Sprintf("/api-keys/%s", projectID), http.StatusFound)
 }
