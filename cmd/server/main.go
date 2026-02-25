@@ -84,6 +84,10 @@ func run() error {
 	}
 	defer pool.Close()
 
+	if err := runMigrations(pool); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+
 	repo := repository.NewPostgresRepository(pool, repository.WithEventBatchSize(cfg.EventBatchSize))
 	m := metrics.New()
 	metrics.RegisterPoolMetrics(m.Registry, pool)
