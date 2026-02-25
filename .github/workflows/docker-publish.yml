@@ -1,10 +1,14 @@
 name: Docker Publish
 
 on:
+  release:
+    types: [published]
+  repository_dispatch:
+    types: [release-please-published]
   workflow_dispatch:
     inputs:
       tag_name:
-        description: Release tag to publish (optional, omit for SHA-only tag)
+        description: Release tag to publish (optional)
         required: false
         type: string
 
@@ -16,6 +20,6 @@ jobs:
   docker-publish:
     uses: matt-riley/matt-riley-ci/.github/workflows/docker-ghcr-publish.yml@338b176231bf389e78268ef2f38c016bb1ff832b
     with:
-      tag-name: ${{ inputs.tag_name }}
+      tag-name: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event_name == 'repository_dispatch' && github.event.client_payload.tag_name || github.event.inputs.tag_name || '' }}
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}

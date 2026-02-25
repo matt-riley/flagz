@@ -7,9 +7,15 @@
             <h1 class="text-3xl font-bold">{{.Project.Name}}</h1>
             <p class="text-gray-600">{{.Project.Description}}</p>
         </div>
-        <button onclick="document.getElementById('create-flag-modal').classList.remove('hidden')" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
-            New Flag
-        </button>
+        <div class="flex space-x-2">
+            <a href="/api-keys/{{.Project.ID}}" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">API Keys</a>
+            <a href="/audit-log/{{.Project.ID}}" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">Audit Log</a>
+            {{if eq .User.Role "admin"}}
+            <button onclick="document.getElementById('create-flag-modal').classList.remove('hidden')" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
+                New Flag
+            </button>
+            {{end}}
+        </div>
     </div>
 </div>
 
@@ -22,7 +28,9 @@
                     <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Key</th>
                     <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Description</th>
                     <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
+                    {{if eq .User.Role "admin"}}
                     <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+                    {{end}}
                 </tr>
             </thead>
             <tbody id="flags-list">
@@ -31,6 +39,7 @@
                     <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm font-mono">{{.Key}}</td>
                     <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">{{.Description}}</td>
                     <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">
+                        {{if eq $.User.Role "admin"}}
                         <button hx-post="/projects/{{$.Project.ID}}/flags/{{.Key}}/toggle"
                                 hx-vals='{"csrf_token": "{{$.CSRFToken}}"}'
                                 hx-target="this"
@@ -38,7 +47,13 @@
                                 class="{{if .Enabled}}bg-green-100 text-green-800{{else}}bg-red-100 text-red-800{{end}} px-2 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer">
                             {{if .Enabled}}Enabled{{else}}Disabled{{end}}
                         </button>
+                        {{else}}
+                        <span class="{{if .Enabled}}bg-green-100 text-green-800{{else}}bg-red-100 text-red-800{{end}} px-2 inline-flex text-xs leading-5 font-semibold rounded-full">
+                            {{if .Enabled}}Enabled{{else}}Disabled{{end}}
+                        </span>
+                        {{end}}
                     </td>
+                    {{if eq $.User.Role "admin"}}
                     <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">
                         <button hx-delete="/projects/{{$.Project.ID}}/flags/{{.Key}}"
                                 hx-headers='{"X-CSRF-Token": "{{$.CSRFToken}}"}'
@@ -49,10 +64,15 @@
                             Delete
                         </button>
                     </td>
+                    {{end}}
                 </tr>
                 {{else}}
                 <tr>
+                    {{if eq $.User.Role "admin"}}
                     <td colspan="4" class="px-5 py-5 border-b border-gray-200 bg-white text-sm text-center">No flags found.</td>
+                    {{else}}
+                    <td colspan="3" class="px-5 py-5 border-b border-gray-200 bg-white text-sm text-center">No flags found.</td>
+                    {{end}}
                 </tr>
                 {{end}}
             </tbody>
@@ -60,6 +80,7 @@
     </div>
 </div>
 
+{{if eq .User.Role "admin"}}
 <!-- Create Flag Modal -->
 <div id="create-flag-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden">
     <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
@@ -89,4 +110,5 @@
         </div>
     </div>
 </div>
+{{end}}
 {{end}}

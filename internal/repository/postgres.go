@@ -60,6 +60,7 @@ type AdminUser struct {
 	ID           string    `json:"id"`
 	Username     string    `json:"username"`
 	PasswordHash string    `json:"-"`
+	Role         string    `json:"role"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -400,12 +401,22 @@ func (r *PostgresRepository) CreateAPIKey(ctx context.Context, projectID string)
 // ListAPIKeys returns metadata for all non-revoked API keys belonging to the
 // given project. Secrets are never included.
 func (r *PostgresRepository) ListAPIKeys(ctx context.Context, projectID string) ([]APIKeyMeta, error) {
-	rows, err := r.pool.Query(ctx, `
+	return r.listAPIKeys(ctx, projectID, false)
+}
+
+func (r *PostgresRepository) listAPIKeys(ctx context.Context, projectID string, newestFirst bool) ([]APIKeyMeta, error) {
+	orderDirection := ""
+	if newestFirst {
+		orderDirection = " DESC"
+	}
+
+	query := `
 		SELECT id, project_id, created_at
 		FROM api_keys
 		WHERE project_id = $1 AND revoked_at IS NULL
-		ORDER BY created_at
-	`, projectID)
+		ORDER BY created_at` + orderDirection
+
+	rows, err := r.pool.Query(ctx, query, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list api keys: %w", err)
 	}
@@ -578,16 +589,17 @@ func (r *PostgresRepository) GetProject(ctx context.Context, id string) (Project
 	return p, nil
 }
 
-// CreateAdminUser inserts a new admin user.
-func (r *PostgresRepository) CreateAdminUser(ctx context.Context, username, passwordHash string) (AdminUser, error) {
+// CreateAdminUser inserts a new admin user with the specified role.
+func (r *PostgresRepository) CreateAdminUser(ctx context.Context, username, passwordHash, role string) (AdminUser, error) {
 	var u AdminUser
 	err := r.pool.QueryRow(ctx, `
-		INSERT INTO admin_users (username, password_hash)
-		VALUES ($1, $2)
-		RETURNING id, username, created_at, updated_at
-	`, username, passwordHash).Scan(
+		INSERT INTO admin_users (username, password_hash, role)
+		VALUES ($1, $2, $3)
+		RETURNING id, username, role, created_at, updated_at
+	`, username, passwordHash, role).Scan(
 		&u.ID,
 		&u.Username,
+		&u.Role,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 	)
@@ -601,13 +613,14 @@ func (r *PostgresRepository) CreateAdminUser(ctx context.Context, username, pass
 func (r *PostgresRepository) GetAdminUserByUsername(ctx context.Context, username string) (AdminUser, error) {
 	var u AdminUser
 	err := r.pool.QueryRow(ctx, `
-		SELECT id, username, password_hash, created_at, updated_at
+		SELECT id, username, password_hash, role, created_at, updated_at
 		FROM admin_users
 		WHERE username = $1
 	`, username).Scan(
 		&u.ID,
 		&u.Username,
 		&u.PasswordHash,
+		&u.Role,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 	)
