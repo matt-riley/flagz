@@ -405,20 +405,16 @@ func (r *PostgresRepository) ListAPIKeys(ctx context.Context, projectID string) 
 }
 
 func (r *PostgresRepository) listAPIKeys(ctx context.Context, projectID string, newestFirst bool) ([]APIKeyMeta, error) {
+	orderDirection := ""
+	if newestFirst {
+		orderDirection = " DESC"
+	}
+
 	query := `
 		SELECT id, project_id, created_at
 		FROM api_keys
 		WHERE project_id = $1 AND revoked_at IS NULL
-		ORDER BY created_at
-	`
-	if newestFirst {
-		query = `
-		SELECT id, project_id, created_at
-		FROM api_keys
-		WHERE project_id = $1 AND revoked_at IS NULL
-		ORDER BY created_at DESC
-	`
-	}
+		ORDER BY created_at` + orderDirection
 
 	rows, err := r.pool.Query(ctx, query, projectID)
 	if err != nil {

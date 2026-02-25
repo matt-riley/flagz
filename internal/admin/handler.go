@@ -614,6 +614,7 @@ func (h *Handler) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Failed to create API key", http.StatusInternalServerError)
 			return
 		}
+		h.logAudit(r.Context(), session.AdminUserID, "api_key_create", projectID, "", map[string]string{"api_key_id": keyID})
 
 		keys, listErr := h.Repo.ListAPIKeysForProject(r.Context(), projectID)
 		if listErr != nil {
