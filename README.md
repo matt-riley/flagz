@@ -180,7 +180,7 @@ All configuration is via environment variables.
 | `TS_STATE_DIR`         |          | `tsnet-state` | Directory to store Tailscale state                                  |
 | `SESSION_SECRET`       |          | —             | Secret for signing admin sessions (32+ chars)                       |
 
-`STREAM_POLL_INTERVAL` accepts any Go duration string: `500ms`, `2s`, `1m`, etc.
+Both `STREAM_POLL_INTERVAL` and `CACHE_RESYNC_INTERVAL` accept any Go duration string: `500ms`, `2s`, `1m`, etc.
 
 ---
 
