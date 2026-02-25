@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.9.2](https://github.com/matt-riley/flagz/compare/v1.9.1...v1.9.2) (2026-02-25)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/matt-riley/flagz to v1.9.1 ([#70](https://github.com/matt-riley/flagz/issues/70)) ([38a749b](https://github.com/matt-riley/flagz/commit/38a749bcb839cff8911e260bc08517221cf2e722))
+
+## [1.9.1](https://github.com/matt-riley/flagz/compare/v1.9.0...v1.9.1) (2026-02-24)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/matt-riley/flagz to v1.8.0 ([#68](https://github.com/matt-riley/flagz/issues/68)) ([5fa4eb3](https://github.com/matt-riley/flagz/commit/5fa4eb32552b5cf61bb5cf9108f39054ecfb6047))
+
+## [1.9.0](https://github.com/matt-riley/flagz/compare/v1.8.0...v1.9.0) (2026-02-24)
+
+
+### Features
+
+* OpenTelemetry instrumentation for repository and service ([#45](https://github.com/matt-riley/flagz/issues/45)) ([28f39a4](https://github.com/matt-riley/flagz/commit/28f39a401bf04dfd6ba2db2c99591a9e54037072))
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/matt-riley/flagz to v1.7.0 ([#65](https://github.com/matt-riley/flagz/issues/65)) ([159f40d](https://github.com/matt-riley/flagz/commit/159f40d243a0bdfa5c6864e3cd083ef35f88620f))
+* make release guard repo-independent ([6d6fcfa](https://github.com/matt-riley/flagz/commit/6d6fcfab56c34ca8e1deae8b5f96e964911edfca))
+
 ## [1.8.0](https://github.com/matt-riley/flagz/compare/v1.7.0...v1.8.0) (2026-02-24)
 
 

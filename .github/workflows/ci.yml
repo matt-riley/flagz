@@ -7,45 +7,15 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Test
-        run: go test ./...
-
-      - name: Test with race detector
-        run: go test -race ./...
-
-      - name: Vet
-        run: go vet ./...
+    uses: matt-riley/matt-riley-ci/.github/workflows/go-ci.yml@v1
+    with:
+      go-version-file: go.mod
+      run-race: true
+      run-vet: true
 
   test-go-client:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: clients/go/go.mod
-          cache: true
-
-      - name: Tidy modules
-        run: cd clients/go && go mod tidy
-
-      - name: Test
-        run: cd clients/go && go test ./...
-
-      - name: Vet
-        run: cd clients/go && go vet ./...
+    uses: matt-riley/matt-riley-ci/.github/workflows/go-ci.yml@v1
+    with:
+      go-version-file: clients/go/go.mod
+      working-directory: clients/go
+      run-vet: true
