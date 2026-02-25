@@ -657,6 +657,8 @@ func (h *Handler) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	session, hasSession := r.Context().Value(sessionContextKey).(repository.AdminSession)
+
 	projectID := strings.TrimPrefix(r.URL.Path, "/api-keys/delete/")
 	if projectID == "" {
 		http.NotFound(w, r)
@@ -672,6 +674,9 @@ func (h *Handler) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 	if err := h.Repo.DeleteAPIKeyByID(r.Context(), projectID, keyID); err != nil {
 		http.Error(w, "Failed to delete API key", http.StatusInternalServerError)
 		return
+	}
+	if hasSession {
+		h.logAudit(r.Context(), session.AdminUserID, "api_key_delete", projectID, "", map[string]string{"api_key_id": keyID})
 	}
 
 	http.Redirect(w, r, fmt.Sprintf("/api-keys/%s", projectID), http.StatusFound)
