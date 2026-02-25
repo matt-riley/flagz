@@ -28,7 +28,10 @@
       "args": [
         "aw",
         "mcp-server"
-      ]
+      ],
+      "env": {
+        "GITHUB_ACTOR": "${GITHUB_ACTOR}"
+      }
     }
   }
 }
