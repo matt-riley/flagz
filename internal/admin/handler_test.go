@@ -276,6 +276,19 @@ func TestHandleAPIKeys_MethodNotAllowed(t *testing.T) {
 	}
 }
 
+func TestHandleAPIKeys_InvalidProjectID(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequest(http.MethodGet, "/api-keys/not-a-uuid", nil)
+	req = req.WithContext(context.WithValue(req.Context(), sessionContextKey, repository.AdminSession{}))
+	rr := httptest.NewRecorder()
+
+	h.handleAPIKeys(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
+	}
+}
+
 func TestHandleAuditLog_MethodNotAllowed(t *testing.T) {
 	h := &Handler{}
 	req := httptest.NewRequest(http.MethodPost, "/audit-log/proj-1", nil)

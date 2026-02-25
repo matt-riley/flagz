@@ -195,3 +195,24 @@ func TestRecordLoginAttempt_Normal(t *testing.T) {
 		t.Fatalf("expected 1 attempt for 10.0.0.2, got %d", got)
 	}
 }
+
+func TestAPIKeyFlashRoundTrip(t *testing.T) {
+	mgr := &SessionManager{
+		apiKeyFlashes: make(map[string]apiKeyFlash),
+	}
+
+	mgr.SetAPIKeyFlash("session-hash", "proj-1", "key-1", "secret-1")
+
+	keyID, secret, ok := mgr.PopAPIKeyFlash("session-hash", "proj-1")
+	if !ok {
+		t.Fatal("expected flash to be present")
+	}
+	if keyID != "key-1" || secret != "secret-1" {
+		t.Fatalf("unexpected flash values: keyID=%q secret=%q", keyID, secret)
+	}
+
+	_, _, ok = mgr.PopAPIKeyFlash("session-hash", "proj-1")
+	if ok {
+		t.Fatal("expected flash to be consumed after pop")
+	}
+}

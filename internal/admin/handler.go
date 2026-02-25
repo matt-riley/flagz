@@ -587,13 +587,18 @@ func (h *Handler) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID := strings.TrimPrefix(r.URL.Path, "/api-keys/")
-	if projectID == "" {
+	projectIDStr := strings.TrimPrefix(r.URL.Path, "/api-keys/")
+	if projectIDStr == "" {
+		http.NotFound(w, r)
+		return
+	}
+	projectID, err := uuid.Parse(projectIDStr)
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
 
-	project, err := h.Repo.GetProject(r.Context(), projectID)
+	project, err := h.Repo.GetProject(r.Context(), projectID.String())
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -611,42 +616,41 @@ func (h *Handler) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == "POST" {
-		keyID, rawSecret, createErr := h.Repo.CreateAPIKeyForProject(r.Context(), projectID)
+		keyID, rawSecret, createErr := h.Repo.CreateAPIKeyForProject(r.Context(), projectID.String())
 		if createErr != nil {
 			http.Error(w, "Failed to create API key", http.StatusInternalServerError)
 			return
 		}
-		h.logAudit(r.Context(), session.AdminUserID, "api_key_create", projectID, "", map[string]string{"api_key_id": keyID})
-
-		keys, listErr := h.Repo.ListAPIKeysForProject(r.Context(), projectID)
-		if listErr != nil {
-			h.log.Error("failed to list API keys", "project_id", projectID, "error", listErr)
+		h.logAudit(r.Context(), session.AdminUserID, "api_key_create", projectID.String(), "", map[string]string{"api_key_id": keyID})
+		if h.SessionMgr != nil {
+			h.SessionMgr.SetAPIKeyFlash(session.IDHash, projectID.String(), keyID, rawSecret)
 		}
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Pragma", "no-cache")
-		if renderErr := Render(w, "api_keys.html", map[string]any{
-			"User":      user,
-			"Project":   project,
-			"APIKeys":   keys,
-			"NewKeyID":  keyID,
-			"NewSecret": rawSecret,
-			"CSRFToken": session.CSRFToken,
-		}); renderErr != nil {
-			h.log.Error("render error", "error", renderErr)
-		}
+		http.Redirect(w, r, fmt.Sprintf("/api-keys/%s", projectID.String()), http.StatusSeeOther)
 		return
 	}
 
-	keys, err := h.Repo.ListAPIKeysForProject(r.Context(), projectID)
+	keys, err := h.Repo.ListAPIKeysForProject(r.Context(), projectID.String())
 	if err != nil {
 		http.Error(w, "Failed to list API keys", http.StatusInternalServerError)
 		return
+	}
+
+	var newKeyID, newSecret string
+	if h.SessionMgr != nil {
+		if keyID, secret, ok := h.SessionMgr.PopAPIKeyFlash(session.IDHash, projectID.String()); ok {
+			newKeyID = keyID
+			newSecret = secret
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Pragma", "no-cache")
+		}
 	}
 
 	if renderErr := Render(w, "api_keys.html", map[string]any{
 		"User":      user,
 		"Project":   project,
 		"APIKeys":   keys,
+		"NewKeyID":  newKeyID,
+		"NewSecret": newSecret,
 		"CSRFToken": session.CSRFToken,
 	}); renderErr != nil {
 		h.log.Error("render error", "error", renderErr)
