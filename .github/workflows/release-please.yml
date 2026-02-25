@@ -9,38 +9,50 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
-  packages: write
 
 jobs:
   release-please:
-    uses: matt-riley/matt-riley-ci/.github/workflows/release-please.yml@v1
-    with:
-      config-file: release-please-config.json
-      manifest-file: .release-please-manifest.json
-      component-output-key: clients/typescript
-    secrets:
-      token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      typescript_release_created: ${{ steps.release.outputs['clients/typescript--release_created'] }}
+      typescript_tag_name: ${{ steps.release.outputs['clients/typescript--tag_name'] }}
+    steps:
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
-  docker-publish:
+  trigger-docker-publish:
+    runs-on: ubuntu-latest
     needs: [release-please]
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
-    uses: matt-riley/matt-riley-ci/.github/workflows/docker-ghcr-publish.yml@v1
-    with:
-      tag-name: ${{ needs.release-please.outputs.tag_name }}
-    secrets:
-      token: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: write
+    steps:
+      - name: Trigger Docker publish workflow
+        uses: peter-evans/repository-dispatch@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: release-please-published
+          client-payload: |
+            {"tag_name":"${{ needs.release-please.outputs.tag_name }}"}
 
   publish-typescript-client:
     runs-on: ubuntu-latest
     needs: [release-please]
-    if: ${{ needs.release-please.outputs.component_release_created == 'true' }}
+    if: ${{ needs.release-please.outputs.typescript_release_created == 'true' }}
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.release-please.outputs.component_tag_name }}
+          ref: ${{ needs.release-please.outputs.typescript_tag_name }}
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
