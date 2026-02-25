@@ -236,8 +236,8 @@ components:
       properties:
         id:
           type: string
-          description: The API key identifier.
-          example: myapp
+          description: The API key identifier (server-generated random hex string).
+          example: a3f9b2c4d8e1f067b82a5c3d9e0f1234
         project_id:
           type: string
           description: The project this key belongs to.
@@ -252,12 +252,12 @@ components:
       properties:
         id:
           type: string
-          description: The API key identifier.
-          example: myapp
+          description: The API key identifier (server-generated random hex string).
+          example: a3f9b2c4d8e1f067b82a5c3d9e0f1234
         secret:
           type: string
-          description: Full bearer token in `id.secret` format. Not stored; cannot be retrieved again.
-          example: myapp.some-generated-secret
+          description: Full bearer token in `id.secret` format. Both parts are server-generated random hex. Not stored; cannot be retrieved again.
+          example: a3f9b2c4d8e1f067b82a5c3d9e0f1234.c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8
 
   responses:
     Unauthorized:

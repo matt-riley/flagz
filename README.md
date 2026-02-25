@@ -168,7 +168,7 @@ All configuration is via environment variables.
 | `CACHE_RESYNC_INTERVAL`|          | `1m`          | Periodic safety-net cache resync interval (must be > 0)                  |
 | `MAX_JSON_BODY_SIZE`   |          | `1048576`     | Maximum HTTP request body size in bytes (must be > 0)                    |
 | `EVENT_BATCH_SIZE`     |          | `1000`        | Maximum events returned per stream poll query (must be > 0)              |
-| `AUTH_RATE_LIMIT`      |          | `10`          | Max authentication attempts per second before rate-limiting (must be > 0)|
+| `AUTH_RATE_LIMIT`      |          | `10`          | Max failed authentication attempts per minute per IP before rate-limiting (must be > 0) |
 | `LOG_LEVEL`            |          | `info`        | Log verbosity (`debug`, `info`, `warn`, `error`)                         |
 | `ADMIN_HOSTNAME`       |          | —             | Hostname for the Admin Portal on Tailscale                               |
 | `TS_AUTH_KEY`          |          | —             | Tailscale Auth Key (required if `ADMIN_HOSTNAME` set)                    |
@@ -305,8 +305,10 @@ All request and response bodies are JSON. Unknown fields in request bodies are r
 The `POST /v1/api-keys` response is:
 
 ```json
-{ "id": "myapp", "secret": "myapp.some-generated-secret" }
+{ "id": "a3f9b2c4d8e1f067b82a5c3d9e0f1234", "secret": "a3f9b2c4d8e1f067b82a5c3d9e0f1234.c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8" }
 ```
+
+Both `id` and `secret` are server-generated random hex strings — there is no request body.
 
 The `secret` value is the full bearer token. Store it somewhere safe — it is shown **once** and cannot be retrieved again.
 
