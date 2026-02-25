@@ -21,6 +21,7 @@ const (
 	sessionDuration    = 24 * time.Hour
 	csrfTokenLength    = 32
 	sessionTokenLength = 32
+	apiKeyFlashTTL     = 5 * time.Minute
 	maxLoginAttempts   = 5
 	loginWindow        = 15 * time.Minute
 	maxTrackedIPs      = 10000
@@ -36,7 +37,14 @@ type SessionManager struct {
 	sessionSecret []byte
 	// Simple in-memory rate limiter for login attempts
 	loginAttempts map[string][]time.Time
+	apiKeyFlashes map[string]apiKeyFlash
 	mu            sync.Mutex
+}
+
+type apiKeyFlash struct {
+	keyID     string
+	secret    string
+	expiresAt time.Time
 }
 
 func NewSessionManager(ctx context.Context, repo *repository.PostgresRepository, sessionSecret string) *SessionManager {
@@ -44,6 +52,7 @@ func NewSessionManager(ctx context.Context, repo *repository.PostgresRepository,
 		repo:          repo,
 		sessionSecret: []byte(sessionSecret),
 		loginAttempts: make(map[string][]time.Time),
+		apiKeyFlashes: make(map[string]apiKeyFlash),
 	}
 	// Periodically clean up old rate limit entries to prevent unbounded memory growth
 	// and purge expired sessions from the database.
@@ -62,6 +71,11 @@ func NewSessionManager(ctx context.Context, repo *repository.PostgresRepository,
 						delete(mgr.loginAttempts, ip)
 					}
 				}
+				for key, flash := range mgr.apiKeyFlashes {
+					if now.After(flash.expiresAt) {
+						delete(mgr.apiKeyFlashes, key)
+					}
+				}
 				mgr.mu.Unlock()
 
 				cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -71,6 +85,43 @@ func NewSessionManager(ctx context.Context, repo *repository.PostgresRepository,
 		}
 	}()
 	return mgr
+}
+
+func apiKeyFlashKey(sessionIDHash, projectID string) string {
+	return sessionIDHash + ":" + projectID
+}
+
+// SetAPIKeyFlash stores a one-time API key secret for PRG flow after creation.
+func (m *SessionManager) SetAPIKeyFlash(sessionIDHash, projectID, keyID, secret string) {
+	if sessionIDHash == "" || projectID == "" || keyID == "" || secret == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.apiKeyFlashes[apiKeyFlashKey(sessionIDHash, projectID)] = apiKeyFlash{
+		keyID:     keyID,
+		secret:    secret,
+		expiresAt: time.Now().Add(apiKeyFlashTTL),
+	}
+}
+
+// PopAPIKeyFlash returns and consumes a one-time API key secret.
+func (m *SessionManager) PopAPIKeyFlash(sessionIDHash, projectID string) (keyID string, secret string, ok bool) {
+	if sessionIDHash == "" || projectID == "" {
+		return "", "", false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := apiKeyFlashKey(sessionIDHash, projectID)
+	flash, found := m.apiKeyFlashes[key]
+	if !found {
+		return "", "", false
+	}
+	delete(m.apiKeyFlashes, key)
+	if time.Now().After(flash.expiresAt) {
+		return "", "", false
+	}
+	return flash.keyID, flash.secret, true
 }
 
 // GenerateSession creates a new session for the user, returning the raw token to be set in the cookie.

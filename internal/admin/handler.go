@@ -25,6 +25,7 @@ import (
 type adminContextKey string
 
 const sessionContextKey adminContextKey = "admin_session"
+const adminUserContextKey adminContextKey = "admin_user"
 
 const (
 	adminAuditWriteTimeout = 2 * time.Second
@@ -74,8 +75,11 @@ func (h *Handler) buildMux() *http.ServeMux {
 
 	// Protected routes
 	mux.HandleFunc("/", h.requireAuth(h.handleDashboard))
-	mux.HandleFunc("/projects", h.requireAuth(h.handleProjects)) // Create project
+	mux.HandleFunc("/projects", h.requireAuth(h.requireAdmin(h.handleProjects))) // Create project
 	mux.HandleFunc("/projects/", h.requireAuth(h.handleProjectDetail))
+	mux.HandleFunc("/api-keys/", h.requireAuth(h.handleAPIKeys))
+	mux.HandleFunc("/api-keys/delete/", h.requireAuth(h.requireAdmin(h.handleDeleteAPIKey)))
+	mux.HandleFunc("/audit-log/", h.requireAuth(h.handleAuditLog))
 
 	// Static assets
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(content))))
@@ -116,6 +120,48 @@ func (h *Handler) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		ctx = middleware.NewContextWithAdminUserID(ctx, session.AdminUserID)
 		next(w, r.WithContext(ctx))
 	}
+}
+
+// requireAdmin blocks write operations for viewer-role users.
+func (h *Handler) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		session, ok := r.Context().Value(sessionContextKey).(repository.AdminSession)
+		if !ok {
+			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+		user, err := h.Repo.GetAdminUserByID(r.Context(), session.AdminUserID)
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if !isAdminRole(user.Role) {
+			http.Error(w, "Forbidden: admin role required", http.StatusForbidden)
+			return
+		}
+		ctx := context.WithValue(r.Context(), adminUserContextKey, user)
+		next(w, r.WithContext(ctx))
+	}
+}
+
+func isAdminRole(role string) bool {
+	return role == "admin"
+}
+
+func canManageAPIKeys(method, role string) bool {
+	if method == http.MethodPost {
+		return isAdminRole(role)
+	}
+
+	return true
+}
+
+func canMutateFlags(method, role string) bool {
+	if method == http.MethodPost || method == http.MethodDelete || method == http.MethodPut || method == http.MethodPatch {
+		return isAdminRole(role)
+	}
+
+	return true
 }
 
 func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
@@ -193,7 +239,7 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		user, err := h.Repo.CreateAdminUser(r.Context(), username, hash)
+		user, err := h.Repo.CreateAdminUser(r.Context(), username, hash, "admin")
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -420,6 +466,24 @@ func (h *Handler) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *repository.Project, subPath []string) {
+	session, ok := r.Context().Value(sessionContextKey).(repository.AdminSession)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		user, err := h.Repo.GetAdminUserByID(r.Context(), session.AdminUserID)
+		if err != nil {
+			http.Error(w, "User not found", http.StatusUnauthorized)
+			return
+		}
+		if !canMutateFlags(r.Method, user.Role) {
+			http.Error(w, "Forbidden: admin role required", http.StatusForbidden)
+			return
+		}
+	}
+
 	// POST /projects/{id}/flags
 	if len(subPath) == 0 && r.Method == "POST" {
 		key := r.FormValue("key")
@@ -508,6 +572,176 @@ func (h *Handler) handleFlags(w http.ResponseWriter, r *http.Request, project *r
 		}
 		http.Redirect(w, r, fmt.Sprintf("/projects/%s", project.ID), http.StatusFound)
 		return
+	}
+}
+
+func (h *Handler) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	session, ok := r.Context().Value(sessionContextKey).(repository.AdminSession)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	projectIDStr := strings.TrimPrefix(r.URL.Path, "/api-keys/")
+	if projectIDStr == "" {
+		http.NotFound(w, r)
+		return
+	}
+	projectID, err := uuid.Parse(projectIDStr)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	project, err := h.Repo.GetProject(r.Context(), projectID.String())
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	user, err := h.Repo.GetAdminUserByID(r.Context(), session.AdminUserID)
+	if err != nil {
+		http.Error(w, "User not found", http.StatusUnauthorized)
+		return
+	}
+
+	if !canManageAPIKeys(r.Method, user.Role) {
+		http.Error(w, "Forbidden: admin role required", http.StatusForbidden)
+		return
+	}
+
+	if r.Method == "POST" {
+		keyID, rawSecret, createErr := h.Repo.CreateAPIKeyForProject(r.Context(), projectID.String())
+		if createErr != nil {
+			http.Error(w, "Failed to create API key", http.StatusInternalServerError)
+			return
+		}
+		h.logAudit(r.Context(), session.AdminUserID, "api_key_create", projectID.String(), "", map[string]string{"api_key_id": keyID})
+		if h.SessionMgr != nil {
+			h.SessionMgr.SetAPIKeyFlash(session.IDHash, projectID.String(), keyID, rawSecret)
+		}
+		http.Redirect(w, r, fmt.Sprintf("/api-keys/%s", projectID.String()), http.StatusFound)
+		return
+	}
+
+	keys, err := h.Repo.ListAPIKeysForProject(r.Context(), projectID.String())
+	if err != nil {
+		http.Error(w, "Failed to list API keys", http.StatusInternalServerError)
+		return
+	}
+
+	var newKeyID, newSecret string
+	if h.SessionMgr != nil {
+		if keyID, secret, ok := h.SessionMgr.PopAPIKeyFlash(session.IDHash, projectID.String()); ok {
+			newKeyID = keyID
+			newSecret = secret
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Pragma", "no-cache")
+		}
+	}
+
+	if renderErr := Render(w, "api_keys.html", map[string]any{
+		"User":      user,
+		"Project":   project,
+		"APIKeys":   keys,
+		"NewKeyID":  newKeyID,
+		"NewSecret": newSecret,
+		"CSRFToken": session.CSRFToken,
+	}); renderErr != nil {
+		h.log.Error("render error", "error", renderErr)
+	}
+}
+
+func (h *Handler) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	projectIDStr := strings.TrimPrefix(r.URL.Path, "/api-keys/delete/")
+	if projectIDStr == "" {
+		http.NotFound(w, r)
+		return
+	}
+	projectID, err := uuid.Parse(projectIDStr)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	keyID := r.FormValue("key_id")
+	if keyID == "" {
+		http.Error(w, "Missing key_id", http.StatusBadRequest)
+		return
+	}
+	adminUser, ok := r.Context().Value(adminUserContextKey).(repository.AdminUser)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if err := h.Repo.DeleteAPIKeyByID(r.Context(), projectID.String(), keyID); err != nil {
+		http.Error(w, "Failed to delete API key", http.StatusInternalServerError)
+		return
+	}
+	h.logAudit(r.Context(), adminUser.ID, "api_key_delete", projectID.String(), "", map[string]string{"api_key_id": keyID})
+
+	http.Redirect(w, r, fmt.Sprintf("/api-keys/%s", projectID.String()), http.StatusFound)
+}
+
+func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	session, ok := r.Context().Value(sessionContextKey).(repository.AdminSession)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	projectIDStr := strings.TrimPrefix(r.URL.Path, "/audit-log/")
+	if projectIDStr == "" {
+		http.NotFound(w, r)
+		return
+	}
+	projectID, err := uuid.Parse(projectIDStr)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	project, err := h.Repo.GetProject(r.Context(), projectID.String())
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	user, err := h.Repo.GetAdminUserByID(r.Context(), session.AdminUserID)
+	if err != nil {
+		http.Error(w, "User not found", http.StatusUnauthorized)
+		return
+	}
+
+	entries, err := h.Repo.ListAuditLogForProject(r.Context(), projectID.String(), 100)
+	if err != nil {
+		http.Error(w, "Failed to load audit log", http.StatusInternalServerError)
+		return
+	}
+
+	if renderErr := Render(w, "audit_log.html", map[string]any{
+		"User":      user,
+		"Project":   project,
+		"Entries":   entries,
+		"CSRFToken": session.CSRFToken,
+	}); renderErr != nil {
+		h.log.Error("render error", "error", renderErr)
 	}
 }
 
