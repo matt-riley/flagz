@@ -659,8 +659,13 @@ func (h *Handler) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID := strings.TrimPrefix(r.URL.Path, "/api-keys/delete/")
-	if projectID == "" {
+	projectIDStr := strings.TrimPrefix(r.URL.Path, "/api-keys/delete/")
+	if projectIDStr == "" {
+		http.NotFound(w, r)
+		return
+	}
+	projectID, err := uuid.Parse(projectIDStr)
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -671,14 +676,18 @@ func (h *Handler) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Repo.DeleteAPIKeyByID(r.Context(), projectID, keyID); err != nil {
+	if err := h.Repo.DeleteAPIKeyByID(r.Context(), projectID.String(), keyID); err != nil {
 		http.Error(w, "Failed to delete API key", http.StatusInternalServerError)
 		return
 	}
-	adminUser := r.Context().Value(adminUserContextKey).(repository.AdminUser)
-	h.logAudit(r.Context(), adminUser.ID, "api_key_delete", projectID, "", map[string]string{"api_key_id": keyID})
+	adminUser, ok := r.Context().Value(adminUserContextKey).(repository.AdminUser)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	h.logAudit(r.Context(), adminUser.ID, "api_key_delete", projectID.String(), "", map[string]string{"api_key_id": keyID})
 
-	http.Redirect(w, r, fmt.Sprintf("/api-keys/%s", projectID), http.StatusFound)
+	http.Redirect(w, r, fmt.Sprintf("/api-keys/%s", projectID.String()), http.StatusFound)
 }
 
 func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
@@ -693,13 +702,18 @@ func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID := strings.TrimPrefix(r.URL.Path, "/audit-log/")
-	if projectID == "" {
+	projectIDStr := strings.TrimPrefix(r.URL.Path, "/audit-log/")
+	if projectIDStr == "" {
+		http.NotFound(w, r)
+		return
+	}
+	projectID, err := uuid.Parse(projectIDStr)
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
 
-	project, err := h.Repo.GetProject(r.Context(), projectID)
+	project, err := h.Repo.GetProject(r.Context(), projectID.String())
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -711,7 +725,7 @@ func (h *Handler) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries, err := h.Repo.ListAuditLogForProject(r.Context(), projectID, 100)
+	entries, err := h.Repo.ListAuditLogForProject(r.Context(), projectID.String(), 100)
 	if err != nil {
 		http.Error(w, "Failed to load audit log", http.StatusInternalServerError)
 		return

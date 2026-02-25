@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -239,13 +240,27 @@ func TestHandleDeleteAPIKey_MissingProjectID(t *testing.T) {
 
 func TestHandleDeleteAPIKey_MissingKeyID(t *testing.T) {
 	h := &Handler{}
-	req := httptest.NewRequest(http.MethodPost, "/api-keys/delete/proj-1", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api-keys/delete/11111111-1111-1111-1111-111111111111", nil)
 	rr := httptest.NewRecorder()
 
 	h.handleDeleteAPIKey(rr, req)
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleDeleteAPIKey_InvalidProjectID(t *testing.T) {
+	h := &Handler{}
+	form := url.Values{"key_id": {"key-1"}}
+	req := httptest.NewRequest(http.MethodPost, "/api-keys/delete/not-a-uuid", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+
+	h.handleDeleteAPIKey(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
 	}
 }
 
@@ -270,5 +285,18 @@ func TestHandleAuditLog_MethodNotAllowed(t *testing.T) {
 
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestHandleAuditLog_InvalidProjectID(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequest(http.MethodGet, "/audit-log/not-a-uuid", nil)
+	req = req.WithContext(context.WithValue(req.Context(), sessionContextKey, repository.AdminSession{}))
+	rr := httptest.NewRecorder()
+
+	h.handleAuditLog(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
 	}
 }
