@@ -198,6 +198,35 @@ components:
       required:
         - flags
 
+    APIKeyMeta:
+      type: object
+      description: Non-sensitive metadata for an API key. The secret is never returned after creation.
+      properties:
+        id:
+          type: string
+          description: The unique API key identifier.
+        project_id:
+          type: string
+          description: The project this key belongs to.
+        created_at:
+          type: string
+          format: date-time
+          description: When this key was created.
+
+    APIKeyCreateResponse:
+      type: object
+      description: Returned once on creation. Store the secret — it is never shown again.
+      properties:
+        id:
+          type: string
+          description: The generated API key identifier.
+        secret:
+          type: string
+          description: The full bearer token in `<id>.<secret>` format. Store this value.
+      example:
+        id: k_abc123
+        secret: k_abc123.supersecretvalue
+
     AuditLogEntry:
       type: object
       properties:
@@ -509,6 +538,88 @@ paths:
                 $ref: '#/components/schemas/Error'
         '500':
           description: Internal Server Error. Streaming unsupported?
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/api-keys:
+    post:
+      summary: Create an API key
+      description: |
+        Create a new API key for the authenticated project. The server generates
+        the key ID and secret. The full token is returned only once — store it.
+      responses:
+        '201':
+          description: API key created. The secret will not be shown again.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              description: Always `no-store` to prevent caching of secrets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIKeyCreateResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          description: Internal Server Error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    get:
+      summary: List API keys
+      description: Returns metadata for all API keys belonging to the authenticated project. Secrets are never included.
+      responses:
+        '200':
+          description: List of API key metadata.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/APIKeyMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          description: Internal Server Error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/api-keys/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The API key ID to delete.
+    delete:
+      summary: Delete an API key
+      description: Permanently revoke an API key. Any requests using this token will immediately fail.
+      responses:
+        '204':
+          description: API key deleted.
+        '400':
+          description: Bad Request. Key ID is required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: API key not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal Server Error.
           content:
             application/json:
               schema:
