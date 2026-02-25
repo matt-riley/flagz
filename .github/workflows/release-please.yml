@@ -12,20 +12,13 @@ permissions:
 
 jobs:
   release-please:
-    runs-on: ubuntu-latest
-    outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-      typescript_release_created: ${{ steps.release.outputs['clients/typescript--release_created'] }}
-      typescript_tag_name: ${{ steps.release.outputs['clients/typescript--tag_name'] }}
-    steps:
-      - name: Run release-please
-        id: release
-        uses: googleapis/release-please-action@v4
-        with:
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+    uses: matt-riley/matt-riley-ci/.github/workflows/release-please.yml@338b176231bf389e78268ef2f38c016bb1ff832b
+    with:
+      config-file: release-please-config.json
+      manifest-file: .release-please-manifest.json
+      component-output-key: clients/typescript
+    secrets:
+      token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
   trigger-docker-publish:
     runs-on: ubuntu-latest
@@ -45,14 +38,14 @@ jobs:
   publish-typescript-client:
     runs-on: ubuntu-latest
     needs: [release-please]
-    if: ${{ needs.release-please.outputs.typescript_release_created == 'true' }}
+    if: ${{ needs.release-please.outputs.component_release_created == 'true' }}
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.release-please.outputs.typescript_tag_name }}
+          ref: ${{ needs.release-please.outputs.component_tag_name }}
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
