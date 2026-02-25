@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.2](https://github.com/matt-riley/flagz/compare/v1.10.1...v1.10.2) (2026-02-25)
+
+
+### Bug Fixes
+
+* doc-updater ([#79](https://github.com/matt-riley/flagz/issues/79)) ([45fdb4b](https://github.com/matt-riley/flagz/commit/45fdb4bbd03a7c242b8c0d86a3eb6bac621d58bd))
+
 ## [1.10.1](https://github.com/matt-riley/flagz/compare/v1.10.0...v1.10.1) (2026-02-25)
 
 
