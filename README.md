@@ -173,7 +173,7 @@ All configuration is via environment variables.
 | `CACHE_RESYNC_INTERVAL`|          | `1m`          | Safety-net full cache reload interval (must be > 0)                 |
 | `MAX_JSON_BODY_SIZE`   |          | `1048576`     | Maximum HTTP request body size in bytes (must be > 0)               |
 | `EVENT_BATCH_SIZE`     |          | `1000`        | Max events returned per stream poll query (must be > 0)             |
-| `AUTH_RATE_LIMIT`      |          | `10`          | Max authentication attempts per second per IP (must be > 0)         |
+| `AUTH_RATE_LIMIT`      |          | `10`          | Max authentication attempts per minute per IP (must be > 0)         |
 | `LOG_LEVEL`            |          | `info`        | Structured log level (`debug`, `info`, `warn`, `error`)             |
 | `ADMIN_HOSTNAME`       |          | —             | Hostname for the Admin Portal on Tailscale                          |
 | `TS_AUTH_KEY`          |          | —             | Tailscale Auth Key (required if ADMIN_HOSTNAME set)                 |
