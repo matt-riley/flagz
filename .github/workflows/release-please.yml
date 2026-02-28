@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   release-please:
-    uses: matt-riley/matt-riley-ci/.github/workflows/release-please.yml@cad248bc8abe50ef49d1a9d7ce1be5c68cd48fba
+    uses: matt-riley/matt-riley-ci/.github/workflows/release-please.yml@3d65b38d6cb83293382f6ce5ca22d142c7303c46
     with:
       config-file: release-please-config.json
       manifest-file: .release-please-manifest.json
@@ -28,7 +28,7 @@ jobs:
       contents: write
     steps:
       - name: Trigger Docker publish workflow
-        uses: peter-evans/repository-dispatch@v4
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           event-type: release-please-published
@@ -43,10 +43,10 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           ref: ${{ needs.release-please.outputs.component_tag_name }}
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6
         with:
           node-version: '24'
           registry-url: 'https://npm.pkg.github.com'
