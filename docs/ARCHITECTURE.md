@@ -85,7 +85,7 @@ The system uses a **Read-Through / Write-Through** cache with **Event-Based Inva
 2. **Invalidation:**
    - The Service subscribes to the Postgres `flag_events` channel.
    - Upon receiving *any* notification, it triggers a full `LoadCache` (reload everything).
-   - **Safety Net:** A 1-minute ticker forces a resync to handle any missed notifications.
+   - **Safety Net:** A configurable ticker (default 1 min, controlled by `CACHE_RESYNC_INTERVAL`) forces a resync to handle any missed notifications.
 3. **Local Updates:** The instance creating a flag updates its own cache immediately, so "read-your-writes" consistency is maintained locally.
 
 ## Event System & Streaming
@@ -147,6 +147,12 @@ Three main tables in PostgreSQL:
   - `DATABASE_URL`: Postgres connection string.
   - `HTTP_ADDR` / `GRPC_ADDR`: Ports to bind.
   - `STREAM_POLL_INTERVAL`: How often to poll DB for client streams (default 1s).
+  - `CACHE_RESYNC_INTERVAL`: Safety-net full cache reload interval (default 1m).
+  - `MAX_JSON_BODY_SIZE`: Max HTTP request body in bytes (default 1MB).
+  - `EVENT_BATCH_SIZE`: Max events per stream poll query (default 1000).
+  - `AUTH_RATE_LIMIT`: Max auth attempts per minute per IP (default 10).
+  - `LOG_LEVEL`: Structured log level (default `info`).
+  - `ADMIN_HOSTNAME` / `TS_AUTH_KEY` / `TS_STATE_DIR` / `SESSION_SECRET`: Admin portal configuration (Tailscale-backed).
 
 ## Design Decisions
 

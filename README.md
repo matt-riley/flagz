@@ -95,7 +95,9 @@ curl -s -H "Authorization: Bearer myapp.my-super-secret" http://localhost:8080/v
 
 ### Creating an API key
 
-flagz doesn't have a key-management API (yet), so you create keys directly in PostgreSQL. A bearer token has the format `<id>.<secret>` — you choose both, hash the secret with bcrypt, and insert the hash.
+#### First key — direct database insert
+
+Your very first API key must be seeded directly in PostgreSQL (you need a key before you can call the API). A bearer token has the format `<id>.<secret>` — you choose both, hash the secret with bcrypt, and insert the hash.
 
 **Option A: One-liner with `htpasswd`** (if you have Apache utils installed)
 
@@ -114,23 +116,7 @@ psql "$DATABASE_URL" -c \
 # Your bearer token is: myapp.my-super-secret
 ```
 
-**Option B: Using Go** (works anywhere Go is installed)
-
-```bash
-# Generate a bcrypt hash using the same function flagz uses internally
-HASH=$(go run -C /path/to/flagz -mod=mod -e '
-  import "golang.org/x/crypto/bcrypt"
-  import "fmt"
-  import "os"
-  h, _ := bcrypt.GenerateFromPassword([]byte(os.Args[1]), bcrypt.DefaultCost)
-  fmt.Print(string(h))
-' "my-super-secret" 2>/dev/null)
-
-# Or simply use a Go one-liner
-HASH=$(go run golang.org/x/crypto/bcrypt@latest hash "my-super-secret")
-```
-
-**Option C: Using Docker** (no local tools needed)
+**Option B: Using Docker** (no local tools needed)
 
 ```bash
 # Spin up a quick container to generate the hash
@@ -151,24 +137,50 @@ Authorization: Bearer myapp.my-super-secret
 
 > **Tip:** The `id` can be anything you like — use it to identify which application or team owns the key. The `secret` should be long and random in production. What you see above is for kicking tyres only.
 
+#### Subsequent keys — REST API
+
+Once you have a key, you can manage API keys through the REST API:
+
+```bash
+# Create a new key (the server generates the id and secret)
+curl -X POST http://localhost:8080/v1/api-keys \
+  -H "Authorization: Bearer myapp.my-super-secret"
+# → {"id":"<generated-id>","secret":"<id>.<generated-secret>"}
+
+# List keys
+curl -H "Authorization: Bearer myapp.my-super-secret" \
+  http://localhost:8080/v1/api-keys
+
+# Delete a key
+curl -X DELETE http://localhost:8080/v1/api-keys/<id> \
+  -H "Authorization: Bearer myapp.my-super-secret"
+```
+
+> The `secret` is only returned at creation time — store it somewhere safe. Subsequent list calls show only the key `id` and `created_at`.
+
 ---
 
 ## Configuration
 
 All configuration is via environment variables.
 
-| Variable               | Required | Default | Description                                         |
-| ---------------------- | -------- | ------- | --------------------------------------------------- |
-| `DATABASE_URL`         | ✅       | —       | PostgreSQL connection string (pgx format)           |
-| `HTTP_ADDR`            |          | `:8080` | Address for the HTTP server                         |
-| `GRPC_ADDR`            |          | `:9090` | Address for the gRPC server                         |
-| `STREAM_POLL_INTERVAL` |          | `1s`    | How often streams poll for new events (must be > 0) |
-| `ADMIN_HOSTNAME`       |          | —       | Hostname for the Admin Portal on Tailscale          |
-| `TS_AUTH_KEY`          |          | —       | Tailscale Auth Key (required if ADMIN_HOSTNAME set) |
-| `TS_STATE_DIR`         |          | `tsnet-state` | Directory to store Tailscale state             |
-| `SESSION_SECRET`       |          | —       | Secret for signing admin sessions (32+ chars)       |
+| Variable               | Required | Default       | Description                                                         |
+| ---------------------- | -------- | ------------- | ------------------------------------------------------------------- |
+| `DATABASE_URL`         | ✅       | —             | PostgreSQL connection string (pgx format)                           |
+| `HTTP_ADDR`            |          | `:8080`       | Address for the HTTP server                                         |
+| `GRPC_ADDR`            |          | `:9090`       | Address for the gRPC server                                         |
+| `STREAM_POLL_INTERVAL` |          | `1s`          | How often streams poll for new events (must be > 0)                 |
+| `CACHE_RESYNC_INTERVAL`|          | `1m`          | Safety-net full cache reload interval (must be > 0)                 |
+| `MAX_JSON_BODY_SIZE`   |          | `1048576`     | Maximum HTTP request body size in bytes (must be > 0)               |
+| `EVENT_BATCH_SIZE`     |          | `1000`        | Max events returned per stream poll query (must be > 0)             |
+| `AUTH_RATE_LIMIT`      |          | `10`          | Max authentication attempts per minute per IP (must be > 0)         |
+| `LOG_LEVEL`            |          | `info`        | Structured log level (`debug`, `info`, `warn`, `error`)             |
+| `ADMIN_HOSTNAME`       |          | —             | Hostname for the Admin Portal on Tailscale                          |
+| `TS_AUTH_KEY`          |          | —             | Tailscale Auth Key (required if ADMIN_HOSTNAME set)                 |
+| `TS_STATE_DIR`         |          | `tsnet-state` | Directory to store Tailscale state                                  |
+| `SESSION_SECRET`       |          | —             | Secret for signing admin sessions (32+ chars)                       |
 
-`STREAM_POLL_INTERVAL` accepts any Go duration string: `500ms`, `2s`, `1m`, etc.
+Both `STREAM_POLL_INTERVAL` and `CACHE_RESYNC_INTERVAL` accept any Go duration string: `500ms`, `2s`, `1m`, etc.
 
 ---
 
@@ -287,6 +299,8 @@ All request and response bodies are JSON. Unknown fields in request bodies are r
 | `PUT`    | `/v1/flags/{key}` | Replace a flag              |
 | `DELETE` | `/v1/flags/{key}` | Delete a flag               |
 
+`GET /v1/flags` supports optional cursor-based pagination via `cursor` (flag key to start after) and `limit` (max flags to return, capped at 1000) query parameters. When either is provided the response is a `{"flags": [...], "next_cursor": "..."}` object; without them it returns a bare array.
+
 **Create a flag**
 
 ```bash
@@ -364,6 +378,26 @@ If a flag key does not exist the request still succeeds — `default_value` is r
 
 ---
 
+### API Keys
+
+| Method   | Path                  | Description              |
+| -------- | --------------------- | ------------------------ |
+| `POST`   | `/v1/api-keys`        | Create an API key        |
+| `GET`    | `/v1/api-keys`        | List API keys            |
+| `DELETE` | `/v1/api-keys/{id}`   | Delete an API key        |
+
+The server generates the key `id` and `secret` on creation and returns them once as `{"id":"...","secret":"<id>.<secret>"}`. The secret is never returned again — list responses include only `id` and `created_at`.
+
+### Audit Log
+
+| Method | Path             | Description             |
+| ------ | ---------------- | ----------------------- |
+| `GET`  | `/v1/audit-log`  | List audit log entries  |
+
+Supports `limit` (default 50, max 1000) and `offset` query parameters. Returns entries newest-first.
+
+---
+
 ## gRPC API
 
 The proto definition lives in `api/proto/v1/`. The service listens on `:9090`.
@@ -408,6 +442,13 @@ To resume from a known position, pass the last received event ID:
 
 ```
 Last-Event-ID: 42
+```
+
+To filter events to a single flag, pass the `key` query parameter:
+
+```bash
+curl -N -H "Authorization: Bearer <id>.<secret>" \
+     "http://localhost:8080/v1/stream?key=dark-mode"
 ```
 
 Events:
@@ -462,9 +503,16 @@ goose -dir migrations postgres "$DATABASE_URL" down
 Current metrics:
 
 ```
-# HELP flagz_http_requests_total Total number of HTTP requests.
-# TYPE flagz_http_requests_total counter
-flagz_http_requests_total 42
+flagz_http_requests_total          counter   Total HTTP requests (labels: method, route, status)
+flagz_http_request_duration_seconds histogram HTTP request latency (labels: method, route, status)
+flagz_grpc_requests_total          counter   Total gRPC requests (labels: method, status)
+flagz_grpc_request_duration_seconds histogram gRPC request latency (labels: method, status)
+flagz_cache_size                   gauge     Flags in the in-memory cache (label: project_id)
+flagz_cache_loads_total            counter   Full cache reloads from the database
+flagz_cache_invalidations_total    counter   NOTIFY-triggered cache invalidations
+flagz_flag_evaluations_total       counter   Flag evaluations (label: result true|false)
+flagz_auth_failures_total          counter   Failed authentication attempts
+flagz_active_streams               gauge     Active streaming connections (label: transport sse|grpc)
 ```
 
 ---
