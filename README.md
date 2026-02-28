@@ -54,7 +54,7 @@
 └────────────┘  cache          │  │ postgres │  NOTIFY flag_events    │
      │          warm on start  │  └──────────┘  ──────────────────►  │
      │          refresh on     │                  cache invalidation  │
-     │          NOTIFY + 1min  └──────────────────────────────────────┘
+     │          NOTIFY + resync (CACHE_RESYNC_INTERVAL) └──────────────────────────────────────┘
      │
      ▼
 POST /v1/evaluate  →  { "key": "dark-mode", "value": true }
@@ -97,7 +97,7 @@ curl -s -H "Authorization: Bearer myapp.my-super-secret" http://localhost:8080/v
 
 Your **first** API key must be bootstrapped directly into PostgreSQL (or through the Admin Portal, if you have it configured). Once you have one valid key, you can create, list, and delete additional keys via the REST API — see [API Keys](#api-keys) below.
 
-For the initial key, a bearer token has the format `<id>.<secret>` — you choose both, hash the secret with bcrypt, and insert the hash.
+For the initial key, a bearer token has the format `<id>.<secret>` — you choose both, hash the secret with bcrypt, and insert the hash. Use the default project id `11111111-1111-1111-1111-111111111111` (created by the migrations) unless you've added more projects.
 
 **Option A: One-liner with `htpasswd`** (if you have Apache utils installed)
 
@@ -111,7 +111,7 @@ HASH=$(htpasswd -nbBC 10 "" "$API_KEY_SECRET" | cut -d: -f2)
 
 # Insert into the database
 psql "$DATABASE_URL" -c \
-  "INSERT INTO api_keys (id, name, key_hash) VALUES ('$API_KEY_ID', 'My App', '$HASH');"
+  "INSERT INTO api_keys (id, name, key_hash, project_id) VALUES ('$API_KEY_ID', 'My App', '$HASH', '11111111-1111-1111-1111-111111111111');"
 
 # Your bearer token is: myapp.my-super-secret
 ```
@@ -142,7 +142,7 @@ HASH=$(docker run --rm -it python:3-slim \
 # Insert it
 docker exec -it $(docker compose ps -q postgres) \
   psql -U flagz -d flagz -c \
-  "INSERT INTO api_keys (id, name, key_hash) VALUES ('myapp', 'My App', '$HASH');"
+  "INSERT INTO api_keys (id, name, key_hash, project_id) VALUES ('myapp', 'My App', '$HASH', '11111111-1111-1111-1111-111111111111');"
 ```
 
 Your bearer token is then `myapp.my-super-secret`. Use it as:
