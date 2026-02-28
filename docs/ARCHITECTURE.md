@@ -150,7 +150,7 @@ Three main tables in PostgreSQL:
   - `CACHE_RESYNC_INTERVAL`: Safety-net full cache reload interval (default 1m).
   - `MAX_JSON_BODY_SIZE`: Max HTTP request body in bytes (default 1MB).
   - `EVENT_BATCH_SIZE`: Max events per stream poll query (default 1000).
-  - `AUTH_RATE_LIMIT`: Max auth attempts per second per IP (default 10).
+  - `AUTH_RATE_LIMIT`: Max auth attempts per minute per IP (default 10).
   - `LOG_LEVEL`: Structured log level (default `info`).
   - `ADMIN_HOSTNAME` / `TS_AUTH_KEY` / `TS_STATE_DIR` / `SESSION_SECRET`: Admin portal configuration (Tailscale-backed).
 
