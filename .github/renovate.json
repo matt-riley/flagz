@@ -1,0 +1,23 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "github>matt-riley/renovate-config",
+    "github>matt-riley/renovate-config:go",
+    "github>matt-riley/renovate-config:docker",
+    "github>matt-riley/renovate-config:github-actions"
+  ],
+  "packageRules": [
+    {
+      "description": "Group pgx/PostgreSQL driver packages",
+      "groupName": "PostgreSQL",
+      "matchPackageNames": ["/^github\\.com\\/jackc\\//"],
+      "labels": ["database", "dependencies"]
+    },
+    {
+      "description": "Group Tailscale packages",
+      "groupName": "Tailscale",
+      "matchPackageNames": ["/^tailscale\\.com/"],
+      "labels": ["networking", "dependencies"]
+    }
+  ]
+}
