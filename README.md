@@ -54,7 +54,7 @@
 └────────────┘  cache          │  │ postgres │  NOTIFY flag_events    │
      │          warm on start  │  └──────────┘  ──────────────────►  │
      │          refresh on     │                  cache invalidation  │
-     │          NOTIFY + 1min  └──────────────────────────────────────┘
+     │          NOTIFY + resync (CACHE_RESYNC_INTERVAL) └──────────────────────────────────────┘
      │
      ▼
 POST /v1/evaluate  →  { "key": "dark-mode", "value": true }
@@ -63,7 +63,7 @@ GET  /v1/stream    →  SSE: flag updated / deleted events
 
 1. On startup the service loads all flags into an in-memory cache.
 2. Every write (create / update / delete) immediately updates the cache _and_ appends a row to `flag_events`, then fires a best-effort PostgreSQL `NOTIFY` on the `flag_events` channel.
-3. The cache listener wakes on `NOTIFY` (and re-syncs every minute regardless, as a safety net) to stay current.
+3. The cache listener wakes on `NOTIFY` (and re-syncs periodically — every `CACHE_RESYNC_INTERVAL`, default 1 minute — as a safety net) to stay current.
 4. `ListFlags` and all evaluations read exclusively from the cache — the database is never touched during hot-path reads.
 
 ---
@@ -95,9 +95,9 @@ curl -s -H "Authorization: Bearer myapp.my-super-secret" http://localhost:8080/v
 
 ### Creating an API key
 
-#### First key — direct database insert
+Your **first** API key must be bootstrapped directly into PostgreSQL (or through the Admin Portal, if you have it configured). Once you have one valid key, you can create, list, and delete additional keys via the REST API — see [API Keys](#api-keys) below.
 
-Your very first API key must be seeded directly in PostgreSQL (you need a key before you can call the API). A bearer token has the format `<id>.<secret>` — you choose both, hash the secret with bcrypt, and insert the hash.
+For the initial key, a bearer token has the format `<id>.<secret>` — you choose both, hash the secret with bcrypt, and insert the hash. Use the default project id `11111111-1111-1111-1111-111111111111` (created by the migrations) unless you've added more projects.
 
 **Option A: One-liner with `htpasswd`** (if you have Apache utils installed)
 
@@ -111,7 +111,7 @@ HASH=$(htpasswd -nbBC 10 "" "$API_KEY_SECRET" | cut -d: -f2)
 
 # Insert into the database
 psql "$DATABASE_URL" -c \
-  "INSERT INTO api_keys (id, name, key_hash) VALUES ('$API_KEY_ID', 'My App', '$HASH');"
+  "INSERT INTO api_keys (id, name, key_hash, project_id) VALUES ('$API_KEY_ID', 'My App', '$HASH', '11111111-1111-1111-1111-111111111111');"
 
 # Your bearer token is: myapp.my-super-secret
 ```
@@ -126,7 +126,7 @@ HASH=$(docker run --rm -it python:3-slim \
 # Insert it
 docker exec -it $(docker compose ps -q postgres) \
   psql -U flagz -d flagz -c \
-  "INSERT INTO api_keys (id, name, key_hash) VALUES ('myapp', 'My App', '$HASH');"
+  "INSERT INTO api_keys (id, name, key_hash, project_id) VALUES ('myapp', 'My App', '$HASH', '11111111-1111-1111-1111-111111111111');"
 ```
 
 Your bearer token is then `myapp.my-super-secret`. Use it as:
@@ -164,23 +164,23 @@ curl -X DELETE http://localhost:8080/v1/api-keys/<id> \
 
 All configuration is via environment variables.
 
-| Variable               | Required | Default       | Description                                                         |
-| ---------------------- | -------- | ------------- | ------------------------------------------------------------------- |
-| `DATABASE_URL`         | ✅       | —             | PostgreSQL connection string (pgx format)                           |
-| `HTTP_ADDR`            |          | `:8080`       | Address for the HTTP server                                         |
-| `GRPC_ADDR`            |          | `:9090`       | Address for the gRPC server                                         |
-| `STREAM_POLL_INTERVAL` |          | `1s`          | How often streams poll for new events (must be > 0)                 |
-| `CACHE_RESYNC_INTERVAL`|          | `1m`          | Safety-net full cache reload interval (must be > 0)                 |
-| `MAX_JSON_BODY_SIZE`   |          | `1048576`     | Maximum HTTP request body size in bytes (must be > 0)               |
-| `EVENT_BATCH_SIZE`     |          | `1000`        | Max events returned per stream poll query (must be > 0)             |
-| `AUTH_RATE_LIMIT`      |          | `10`          | Max authentication attempts per minute per IP (must be > 0)         |
-| `LOG_LEVEL`            |          | `info`        | Structured log level (`debug`, `info`, `warn`, `error`)             |
-| `ADMIN_HOSTNAME`       |          | —             | Hostname for the Admin Portal on Tailscale                          |
-| `TS_AUTH_KEY`          |          | —             | Tailscale Auth Key (required if ADMIN_HOSTNAME set)                 |
-| `TS_STATE_DIR`         |          | `tsnet-state` | Directory to store Tailscale state                                  |
-| `SESSION_SECRET`       |          | —             | Secret for signing admin sessions (32+ chars)                       |
+| Variable               | Required | Default       | Description                                                              |
+| ---------------------- | -------- | ------------- | ------------------------------------------------------------------------ |
+| `DATABASE_URL`         | ✅       | —             | PostgreSQL connection string (pgx format)                                |
+| `HTTP_ADDR`            |          | `:8080`       | Address for the HTTP server                                              |
+| `GRPC_ADDR`            |          | `:9090`       | Address for the gRPC server                                              |
+| `STREAM_POLL_INTERVAL` |          | `1s`          | How often streams poll for new events (must be > 0)                      |
+| `CACHE_RESYNC_INTERVAL`|          | `1m`          | Periodic safety-net cache resync interval (must be > 0)                  |
+| `MAX_JSON_BODY_SIZE`   |          | `1048576`     | Maximum HTTP request body size in bytes (must be > 0)                    |
+| `EVENT_BATCH_SIZE`     |          | `1000`        | Maximum events returned per stream poll query (must be > 0)              |
+| `AUTH_RATE_LIMIT`      |          | `10`          | Max failed authentication attempts per minute per IP before rate-limiting (must be > 0) |
+| `LOG_LEVEL`            |          | `info`        | Log verbosity (`debug`, `info`, `warn`, `error`)                         |
+| `ADMIN_HOSTNAME`       |          | —             | Hostname for the Admin Portal on Tailscale                               |
+| `TS_AUTH_KEY`          |          | —             | Tailscale Auth Key (required if `ADMIN_HOSTNAME` set)                    |
+| `TS_STATE_DIR`         |          | `tsnet-state` | Directory to store Tailscale state                                       |
+| `SESSION_SECRET`       |          | —             | Secret for signing admin sessions (32+ chars, required if `ADMIN_HOSTNAME` set) |
 
-Both `STREAM_POLL_INTERVAL` and `CACHE_RESYNC_INTERVAL` accept any Go duration string: `500ms`, `2s`, `1m`, etc.
+`STREAM_POLL_INTERVAL` accepts any Go duration string: `500ms`, `2s`, `1m`, etc.
 
 ---
 
@@ -299,7 +299,31 @@ All request and response bodies are JSON. Unknown fields in request bodies are r
 | `PUT`    | `/v1/flags/{key}` | Replace a flag              |
 | `DELETE` | `/v1/flags/{key}` | Delete a flag               |
 
-`GET /v1/flags` supports optional cursor-based pagination via `cursor` (flag key to start after) and `limit` (max flags to return, capped at 1000) query parameters. When either is provided the response is a `{"flags": [...], "next_cursor": "..."}` object; without them it returns a bare array.
+### API Keys
+
+| Method   | Path                  | Description                             |
+| -------- | --------------------- | --------------------------------------- |
+| `POST`   | `/v1/api-keys`        | Create an API key (returns id + secret) |
+| `GET`    | `/v1/api-keys`        | List API key metadata for this project  |
+| `DELETE` | `/v1/api-keys/{id}`   | Revoke an API key                       |
+
+The `POST /v1/api-keys` response is:
+
+```json
+{ "id": "a3f9b2c4d8e1f067b82a5c3d9e0f1234", "secret": "a3f9b2c4d8e1f067b82a5c3d9e0f1234.c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8" }
+```
+
+Both `id` and `secret` are server-generated random hex strings — there is no request body.
+
+The `secret` value is the full bearer token. Store it somewhere safe — it is shown **once** and cannot be retrieved again.
+
+### Audit log
+
+| Method | Path             | Description                                          |
+| ------ | ---------------- | ---------------------------------------------------- |
+| `GET`  | `/v1/audit-log`  | List audit log entries for this project (newest first) |
+
+Supports `limit` (default 50, max 1000) and `offset` query parameters.
 
 **Create a flag**
 

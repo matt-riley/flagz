@@ -233,7 +233,6 @@ if err != nil {
 | `400`  | Bad request — malformed JSON, missing fields, or providing both `key` and `requests` to evaluate |
 | `401`  | Unauthorized — invalid or missing API key |
 | `404`  | Flag not found |
-| `409`  | Conflict — flag with that key already exists |
 | `500`  | Internal server error |
 
 ## Streaming with reconnection
