@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.11.2](https://github.com/matt-riley/flagz/compare/v1.11.1...v1.11.2) (2026-03-05)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/matt-riley/flagz to v1.11.1 ([#102](https://github.com/matt-riley/flagz/issues/102)) ([bd64ade](https://github.com/matt-riley/flagz/commit/bd64ade12aad0659904564f06287b86a18386b15))
+* **deps:** update opentelemetry ([#104](https://github.com/matt-riley/flagz/issues/104)) ([4aeea7a](https://github.com/matt-riley/flagz/commit/4aeea7abac3321561664ebfa0384ffd7fcff7a0a))
+
 ## [1.11.1](https://github.com/matt-riley/flagz/compare/v1.11.0...v1.11.1) (2026-02-28)
 
 
