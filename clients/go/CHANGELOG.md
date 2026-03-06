@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.7](https://github.com/matt-riley/flagz/compare/go-client-v0.3.6...go-client-v0.3.7) (2026-03-06)
+
+
+### Bug Fixes
+
+* **deps:** update module google.golang.org/grpc to v1.79.2 ([#118](https://github.com/matt-riley/flagz/issues/118)) ([e4177fb](https://github.com/matt-riley/flagz/commit/e4177fb44ec5297eff462a1bfd9b3f019322ace8))
+
 ## [0.3.6](https://github.com/matt-riley/flagz/compare/go-client-v0.3.5...go-client-v0.3.6) (2026-03-06)
 
 
