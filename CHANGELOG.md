@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.4](https://github.com/matt-riley/flagz/compare/v1.11.3...v1.11.4) (2026-03-06)
+
+
+### Bug Fixes
+
+* agentic workflow ([c2f1ab5](https://github.com/matt-riley/flagz/commit/c2f1ab5876fe9612b6453f1a0e6a4768ea238001))
+
 ## [1.11.3](https://github.com/matt-riley/flagz/compare/v1.11.2...v1.11.3) (2026-03-06)
 
 
