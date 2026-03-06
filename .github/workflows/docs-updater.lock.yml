@@ -1140,6 +1140,7 @@ jobs:
           name: threat-detection.log
           path: /tmp/gh-aw/threat-detection/detection.log
           if-no-files-found: ignore
+          overwrite: true
   safe_outputs:
     needs:
       - activation
