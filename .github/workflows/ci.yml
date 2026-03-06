@@ -7,15 +7,17 @@ on:
 
 jobs:
   test:
-    uses: matt-riley/matt-riley-ci/.github/workflows/go-ci.yml@7bf33bf0eef269c4a4b1d85e1668dec14fb8ffff # v1
+    uses: matt-riley/matt-riley-ci/.github/workflows/go-ci.yml@42852113fcfc14e96f318703defc076d0b0a6196 # v1
     with:
       go-version-file: go.mod
       run-race: true
       run-vet: true
+      concurrency-suffix: test
 
   test-go-client:
-    uses: matt-riley/matt-riley-ci/.github/workflows/go-ci.yml@7bf33bf0eef269c4a4b1d85e1668dec14fb8ffff # v1
+    uses: matt-riley/matt-riley-ci/.github/workflows/go-ci.yml@42852113fcfc14e96f318703defc076d0b0a6196 # v1
     with:
-      go-version-file: clients/go/go.mod
+      go-version-file: go.mod
       working-directory: clients/go
       run-vet: true
+      concurrency-suffix: test-go-client
