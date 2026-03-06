@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.1](https://github.com/matt-riley/flagz/compare/v1.13.0...v1.13.1) (2026-03-06)
+
+
+### Bug Fixes
+
+* **deps:** update module google.golang.org/grpc to v1.79.2 ([#118](https://github.com/matt-riley/flagz/issues/118)) ([e4177fb](https://github.com/matt-riley/flagz/commit/e4177fb44ec5297eff462a1bfd9b3f019322ace8))
+
 ## [1.13.0](https://github.com/matt-riley/flagz/compare/v1.12.0...v1.13.0) (2026-03-06)
 
 
