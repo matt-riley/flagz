@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5](https://github.com/matt-riley/flagz/compare/go-client-v0.3.4...go-client-v0.3.5) (2026-03-06)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/matt-riley/flagz to v1.11.2 ([#112](https://github.com/matt-riley/flagz/issues/112)) ([0f560bc](https://github.com/matt-riley/flagz/commit/0f560bca4b85a9e49f85cbf84c135803e9c738d8))
+
 ## [0.3.4](https://github.com/matt-riley/flagz/compare/go-client-v0.3.3...go-client-v0.3.4) (2026-03-05)
 
 
