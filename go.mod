@@ -19,7 +19,7 @@ require (
 	golang.org/x/time v0.14.0
 	google.golang.org/grpc v1.79.1
 	google.golang.org/protobuf v1.36.11
-	tailscale.com v1.94.2
+	tailscale.com v1.96.0
 )
 
 require (
@@ -56,12 +56,12 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dblohm7/wingoes v0.0.0-20240119213807-a09d6be7affa // indirect
 	github.com/distribution/reference v0.6.0 // indirect
-	github.com/docker/docker v28.5.1+incompatible // indirect
+	github.com/docker/docker v28.5.2+incompatible // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/ebitengine/purego v0.8.4 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
-	github.com/gaissmai/bart v0.18.0 // indirect
+	github.com/gaissmai/bart v0.26.1 // indirect
 	github.com/go-json-experiment/json v0.0.0-20250813024750-ebf49471dced // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -139,5 +139,5 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20260209200024-4cfbd4190f57 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260217215200-42d3e9bedb6d // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	gvisor.dev/gvisor v0.0.0-20250205023644-9414b50a5633 // indirect
+	gvisor.dev/gvisor v0.0.0-20260224225140-573d5e7127a8 // indirect
 )
