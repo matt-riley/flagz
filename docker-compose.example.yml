@@ -1,5 +1,5 @@
 # EXAMPLE ONLY: local PostgreSQL + flagz stack for development/testing.
-# Run DB migrations separately before using API/gRPC endpoints.
+# The server automatically applies database migrations on startup.
 
 services:
   postgres:

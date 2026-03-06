@@ -14,6 +14,16 @@
 //     (default "1000", must be > 0 if set).
 //   - CACHE_RESYNC_INTERVAL: safety-net cache refresh interval
 //     (default "1m", must be > 0 if set).
+//   - AUTH_RATE_LIMIT: max failed authentication attempts per minute per IP
+//     before rate-limiting (default "10", must be > 0 if set).
+//   - LOG_LEVEL: log verbosity — debug, info, warn/warning, or error; unrecognized
+//     values default to "info" (default "info").
+//   - ADMIN_HOSTNAME: hostname for the Admin Portal on Tailscale; when set,
+//     SESSION_SECRET is required.
+//   - TS_AUTH_KEY: Tailscale auth key used to register the Admin Portal node.
+//   - TS_STATE_DIR: directory to persist Tailscale state (default "tsnet-state").
+//   - SESSION_SECRET: secret for signing admin session cookies; must be at
+//     least 32 characters when ADMIN_HOSTNAME is set.
 package config
 
 import (

@@ -26,7 +26,7 @@ Hey — thanks for considering a contribution! Whether it's a bug fix, a new fea
 | ---------- | ----------------------------------------- |
 | **Go 1.25+** | The server and Go client are written in Go |
 | **PostgreSQL** | Where the flags live                    |
-| **[goose](https://github.com/pressly/goose)** | Database migration runner |
+| **[goose](https://github.com/pressly/goose)** | Development tool for rolling back migrations and creating new migration files |
 | **Docker & Docker Compose** | Easiest way to spin up the full stack |
 
 ### Clone the repo
@@ -45,16 +45,7 @@ cp docker-compose.example.yml docker-compose.yml
 docker compose up --build -d
 ```
 
-This starts PostgreSQL 18 and the flagz server. You'll still need to run migrations (see below).
-
-### Run migrations
-
-From the host, with Postgres running:
-
-```bash
-DATABASE_URL="postgresql://flagz:flagz@localhost:5432/flagz?sslmode=disable" \
-  goose -dir migrations postgres "$DATABASE_URL" up
-```
+This starts PostgreSQL 18 and the flagz server. Migrations are applied automatically on startup.
 
 ---
 

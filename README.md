@@ -70,7 +70,7 @@ GET  /v1/stream    →  SSE: flag updated / deleted events
 
 ## Quickstart
 
-**Prerequisites:** Docker, a running PostgreSQL instance, and the goose migration tool.
+**Prerequisites:** Docker and a running PostgreSQL instance.
 
 ```bash
 # 1. Clone and build
@@ -81,13 +81,9 @@ cd flagz
 cp docker-compose.example.yml docker-compose.yml
 docker compose up --build -d
 
-# 3. Run migrations (from the host, against the local Postgres)
-DATABASE_URL="postgresql://flagz:flagz@localhost:5432/flagz?sslmode=disable" \
-  goose -dir migrations postgres "$DATABASE_URL" up
+# 3. Create an API key (see "Creating an API key" below)
 
-# 4. Create an API key (see "Creating an API key" below)
-
-# 5. Kick the tyres
+# 4. Kick the tyres
 curl -s -H "Authorization: Bearer myapp.my-super-secret" http://localhost:8080/v1/flags
 ```
 
@@ -402,26 +398,6 @@ If a flag key does not exist the request still succeeds — `default_value` is r
 
 ---
 
-### API Keys
-
-| Method   | Path                  | Description              |
-| -------- | --------------------- | ------------------------ |
-| `POST`   | `/v1/api-keys`        | Create an API key        |
-| `GET`    | `/v1/api-keys`        | List API keys            |
-| `DELETE` | `/v1/api-keys/{id}`   | Delete an API key        |
-
-The server generates the key `id` and `secret` on creation and returns them once as `{"id":"...","secret":"<id>.<secret>"}`. The secret is never returned again — list responses include only `id` and `created_at`.
-
-### Audit Log
-
-| Method | Path             | Description             |
-| ------ | ---------------- | ----------------------- |
-| `GET`  | `/v1/audit-log`  | List audit log entries  |
-
-Supports `limit` (default 50, max 1000) and `offset` query parameters. Returns entries newest-first.
-
----
-
 ## gRPC API
 
 The proto definition lives in `api/proto/v1/`. The service listens on `:9090`.
@@ -499,12 +475,16 @@ An `event: error` frame is emitted if the server encounters a problem mid-stream
 
 Migrations are managed with [goose](https://github.com/pressly/goose) and live in `migrations/`.
 
-```bash
-# Apply all pending migrations
-goose -dir migrations postgres "$DATABASE_URL" up
+The server automatically applies all pending `up` migrations on startup — no manual step required.
 
+To roll back or check status manually (from the host, with Postgres running):
+
+```bash
 # Roll back the last migration
 goose -dir migrations postgres "$DATABASE_URL" down
+
+# Check migration status
+goose -dir migrations postgres "$DATABASE_URL" status
 ```
 
 ### Schema overview
