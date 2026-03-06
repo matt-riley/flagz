@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.6](https://github.com/matt-riley/flagz/compare/go-client-v0.3.5...go-client-v0.3.6) (2026-03-06)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/matt-riley/flagz to v1.11.3 ([#117](https://github.com/matt-riley/flagz/issues/117)) ([7da8966](https://github.com/matt-riley/flagz/commit/7da896651d6a64c5ea57cf77961a9d296bb9be49))
+* **deps:** update module tailscale.com to v1.96.0 ([#120](https://github.com/matt-riley/flagz/issues/120)) ([3a59efc](https://github.com/matt-riley/flagz/commit/3a59efcbea35d84be197279e6513e2a9d026f040))
+
 ## [0.3.5](https://github.com/matt-riley/flagz/compare/go-client-v0.3.4...go-client-v0.3.5) (2026-03-06)
 
 
