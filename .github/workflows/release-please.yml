@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   release-please:
-    uses: matt-riley/matt-riley-ci/.github/workflows/release-please.yml@fb1b12fb5c315a76f8d207ad87e39a41ea03c83d
+    uses: matt-riley/matt-riley-ci/.github/workflows/release-please.yml@8ae120ece91bac9380d97371e6a319d2d9a27a7b
     with:
       config-file: release-please-config.json
       manifest-file: .release-please-manifest.json
