@@ -1,6 +1,6 @@
 module github.com/matt-riley/flagz
 
-go 1.26.0
+go 1.26.1
 
 require (
 	github.com/docker/go-connections v0.6.0
@@ -19,7 +19,7 @@ require (
 	golang.org/x/time v0.15.0
 	google.golang.org/grpc v1.79.2
 	google.golang.org/protobuf v1.36.11
-	tailscale.com v1.96.0
+	tailscale.com v1.96.1
 )
 
 require (
