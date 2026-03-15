@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.13.2](https://github.com/matt-riley/flagz/compare/v1.13.1...v1.13.2) (2026-03-13)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/matt-riley/flagz to v1.13.1 ([#126](https://github.com/matt-riley/flagz/issues/126)) ([d534462](https://github.com/matt-riley/flagz/commit/d534462e5e5ecfec31937f4e1461915279ca5b92))
+* **deps:** update module github.com/testcontainers/testcontainers-go to v0.41.0 ([#133](https://github.com/matt-riley/flagz/issues/133)) ([23ef977](https://github.com/matt-riley/flagz/commit/23ef97722bca915d6f2c45362b5ee098c00139dc))
+* **deps:** update module golang.org/x/crypto to v0.49.0 ([#135](https://github.com/matt-riley/flagz/issues/135)) ([a619cdc](https://github.com/matt-riley/flagz/commit/a619cdccb303117c3ab022e0ad5d370ab557c877))
+* **deps:** update module golang.org/x/time to v0.15.0 ([#127](https://github.com/matt-riley/flagz/issues/127)) ([e58a5e1](https://github.com/matt-riley/flagz/commit/e58a5e113beab5460409fdbc28b0abaf49d6cc39))
+* **deps:** update module tailscale.com to v1.96.1 ([#132](https://github.com/matt-riley/flagz/issues/132)) ([c6f7dae](https://github.com/matt-riley/flagz/commit/c6f7dae5955a4e26ac685d3d34ae06cdc7440631))
+* **deps:** update opentelemetry ([#130](https://github.com/matt-riley/flagz/issues/130)) ([b1179b9](https://github.com/matt-riley/flagz/commit/b1179b90433773c1d3b19dc8ecdd8fe000a6d6ba))
+
 ## [1.13.1](https://github.com/matt-riley/flagz/compare/v1.13.0...v1.13.1) (2026-03-06)
 
 
