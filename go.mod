@@ -19,7 +19,7 @@ require (
 	golang.org/x/time v0.15.0
 	google.golang.org/grpc v1.79.3
 	google.golang.org/protobuf v1.36.11
-	tailscale.com v1.96.2
+	tailscale.com v1.96.3
 )
 
 require (
