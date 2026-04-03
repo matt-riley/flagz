@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.9](https://github.com/matt-riley/flagz/compare/go-client-v0.3.8...go-client-v0.3.9) (2026-04-03)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/matt-riley/flagz to v1.13.2 ([#139](https://github.com/matt-riley/flagz/issues/139)) ([33e96d9](https://github.com/matt-riley/flagz/commit/33e96d9890399b2c878de4470b70da891d23800b))
+* **deps:** update module google.golang.org/grpc to v1.79.3 ([#144](https://github.com/matt-riley/flagz/issues/144)) ([09fa944](https://github.com/matt-riley/flagz/commit/09fa944f99eb84965c153f371a4b259b9236287c))
+* **deps:** update module google.golang.org/grpc to v1.80.0 ([#167](https://github.com/matt-riley/flagz/issues/167)) ([204151a](https://github.com/matt-riley/flagz/commit/204151a9ba5a2c867f049d9c1c667e98640ea6a3))
+
 ## [0.3.8](https://github.com/matt-riley/flagz/compare/go-client-v0.3.7...go-client-v0.3.8) (2026-03-13)
 
 

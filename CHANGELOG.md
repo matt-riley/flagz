@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.13.3](https://github.com/matt-riley/flagz/compare/v1.13.2...v1.13.3) (2026-04-03)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/jackc/pgx/v5 to v5.9.1 ([#151](https://github.com/matt-riley/flagz/issues/151)) ([4287a88](https://github.com/matt-riley/flagz/commit/4287a886a7d70e755a523d8861c69e38e4089992))
+* **deps:** update module github.com/matt-riley/flagz to v1.13.2 ([#139](https://github.com/matt-riley/flagz/issues/139)) ([33e96d9](https://github.com/matt-riley/flagz/commit/33e96d9890399b2c878de4470b70da891d23800b))
+* **deps:** update module google.golang.org/grpc to v1.79.3 ([#144](https://github.com/matt-riley/flagz/issues/144)) ([09fa944](https://github.com/matt-riley/flagz/commit/09fa944f99eb84965c153f371a4b259b9236287c))
+* **deps:** update module google.golang.org/grpc to v1.80.0 ([#167](https://github.com/matt-riley/flagz/issues/167)) ([204151a](https://github.com/matt-riley/flagz/commit/204151a9ba5a2c867f049d9c1c667e98640ea6a3))
+* **deps:** update module tailscale.com to v1.96.2 ([#145](https://github.com/matt-riley/flagz/issues/145)) ([ba42440](https://github.com/matt-riley/flagz/commit/ba424407d9345425611f2838161e4477e7ec8380))
+* **deps:** update module tailscale.com to v1.96.3 ([#148](https://github.com/matt-riley/flagz/issues/148)) ([59c7096](https://github.com/matt-riley/flagz/commit/59c7096e74f9b8aa6bce973042e948397b8ecb3f))
+* **deps:** update module tailscale.com to v1.96.4 ([#157](https://github.com/matt-riley/flagz/issues/157)) ([1de661b](https://github.com/matt-riley/flagz/commit/1de661bffb29c19940211af8d8115f4f8baef82a))
+* **deps:** update module tailscale.com to v1.96.5 ([#162](https://github.com/matt-riley/flagz/issues/162)) ([ca7b12c](https://github.com/matt-riley/flagz/commit/ca7b12c4292ba7c04b88c2a7811241018c543361))
+
 ## [1.13.2](https://github.com/matt-riley/flagz/compare/v1.13.1...v1.13.2) (2026-03-13)
 
 
