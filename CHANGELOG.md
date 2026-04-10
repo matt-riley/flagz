@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.4](https://github.com/matt-riley/flagz/compare/v1.13.3...v1.13.4) (2026-04-10)
+
+
+### Bug Fixes
+
+* **deps:** update opentelemetry to v0.68.0 ([#175](https://github.com/matt-riley/flagz/issues/175)) ([687b424](https://github.com/matt-riley/flagz/commit/687b4243568ef044c4a7093a379a96371a5cde85))
+
 ## [1.13.3](https://github.com/matt-riley/flagz/compare/v1.13.2...v1.13.3) (2026-04-03)
 
 
