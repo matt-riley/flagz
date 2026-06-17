@@ -3,7 +3,7 @@ module github.com/matt-riley/flagz
 go 1.26.1
 
 require (
-	github.com/docker/go-connections v0.6.0
+	github.com/docker/go-connections v0.7.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/pressly/goose/v3 v3.27.0
