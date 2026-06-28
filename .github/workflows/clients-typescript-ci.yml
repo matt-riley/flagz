@@ -7,15 +7,13 @@ on:
 
 jobs:
   build-and-test:
-    uses: matt-riley/matt-riley-ci/.github/workflows/node-ci.yml@bcaf4ae43edf7d26421741424b82c842c83e55ce # v2
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@bcaf4ae43edf7d26421741424b82c842c83e55ce # v2
     with:
-      node-version: "24"
-      package-manager: npm
+      install: true
       working-directory: clients/typescript
-      cache-dependency-path: clients/typescript/package-lock.json
-      run-lint: false
-      run-test: true
-      run-build: true
+      lint: false
+      test: true
+      build: true
 
   verify-proto-sync:
     runs-on: ubuntu-latest
