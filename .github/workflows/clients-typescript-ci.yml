@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-and-test:
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@0d1d8e7a149a53fcaaca6e128f62e0e3d8fdf293 # v2
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@4ff76b1a606b1fbba163119a65bf7b05f91ab9b6 # v3
     with:
       install: true
       working-directory: clients/typescript
