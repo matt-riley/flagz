@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-and-test:
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@0d1d8e7a149a53fcaaca6e128f62e0e3d8fdf293 # v2
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@2aa90cd79663d10959d67faf89a3ecce29392f6a # v2
     with:
       install: true
       working-directory: clients/typescript
@@ -18,7 +18,7 @@ jobs:
   verify-proto-sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Verify proto sync
         run: |
