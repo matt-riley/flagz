@@ -12,7 +12,11 @@ permissions:
 
 jobs:
   release-please:
-    uses: matt-riley/matt-riley-ci/.github/workflows/release-please.yml@bcaf4ae43edf7d26421741424b82c842c83e55ce
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    uses: matt-riley/matt-riley-ci/.github/workflows/release-please.yml@cb986078a5bd4775e5fb05348f3618e41fedf4de # v4
     with:
       config-file: release-please-config.json
       manifest-file: .release-please-manifest.json
@@ -25,15 +29,20 @@ jobs:
     needs: [release-please]
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     permissions:
-      contents: write
+      contents: read
+      actions: write
     steps:
-      - name: Trigger Docker publish workflow
-        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          event-type: release-please-published
-          client-payload: |
-            {"tag_name":"${{ needs.release-please.outputs.tag_name }}"}
+      - name: Publish the released tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          RELEASE_TOKEN_AVAILABLE: ${{ secrets.RELEASE_PLEASE_TOKEN != '' }}
+        run: |
+          if [ "$RELEASE_TOKEN_AVAILABLE" = true ]; then
+            echo 'The release token starts Docker publication automatically.'
+          else
+            gh workflow run docker-publish.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+          fi
 
   publish-typescript-client:
     runs-on: ubuntu-latest
