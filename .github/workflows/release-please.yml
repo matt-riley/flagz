@@ -16,7 +16,7 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
-    uses: matt-riley/matt-riley-ci/.github/workflows/release-please.yml@cb986078a5bd4775e5fb05348f3618e41fedf4de # v4
+    uses: matt-riley/matt-riley-ci/.github/workflows/release-please.yml@0a310f1286537ed4fd000af4b35cd6459b00448d # v4
     with:
       config-file: release-please-config.json
       manifest-file: .release-please-manifest.json
@@ -52,10 +52,10 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.release-please.outputs.component_tag_name }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '24'
           registry-url: 'https://npm.pkg.github.com'
