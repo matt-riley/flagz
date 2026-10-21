@@ -28,3 +28,4 @@ jobs:
       run-vet: false
       run-test: true
       working-directory: clients/go
+      build-command: go mod tidy
