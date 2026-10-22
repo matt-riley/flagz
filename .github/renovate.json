@@ -5,7 +5,8 @@
     "github>matt-riley/renovate-config",
     "github>matt-riley/renovate-config:go",
     "github>matt-riley/renovate-config:docker",
-    "github>matt-riley/renovate-config:github-actions"
+    "github>matt-riley/renovate-config:github-actions",
+    "github>matt-riley/renovate-config:schedule-thursday"
   ],
   "packageRules": [
     {
