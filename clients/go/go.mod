@@ -1,6 +1,6 @@
 module github.com/matt-riley/flagz/clients/go
 
-go 1.27.1
+go 1.27.3
 
 require (
 	github.com/matt-riley/flagz v1.13.3
