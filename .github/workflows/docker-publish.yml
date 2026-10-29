@@ -14,7 +14,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: matt-riley/matt-riley-ci/.github/workflows/docker-ghcr-publish.yml@cb986078a5bd4775e5fb05348f3618e41fedf4de # v4
+    uses: matt-riley/matt-riley-ci/.github/workflows/docker-ghcr-publish.yml@e802c1e932579d1e840f6dd4f8316458d1f96983 # v4
     with:
       tag-name: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
     secrets:
