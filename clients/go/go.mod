@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/matt-riley/flagz v1.13.3
-	google.golang.org/grpc v1.84.0
+	google.golang.org/grpc v1.85.0
 )
 
 require (
